@@ -11,6 +11,7 @@ type User struct {
 	CreatedAt    time.Time `gorm:"not null;autoCreateTime" json:"createdAt"`
 	IsActive     bool      `gorm:"not null;default:true" json:"isActive"`
 	LastLoginAt  time.Time `gorm:"not null" json:"lastLoginAt"`
+	Timezone     string    `gorm:"type:varchar(64);not null;default:'UTC'" json:"timezone"`
 }
 
 type RegisterDTO struct {
@@ -18,6 +19,7 @@ type RegisterDTO struct {
 	Surname  string `json:"surname" validate:"required,min=2"`
 	Email    string `json:"email" validate:"required,email"`
 	Password string `json:"password" validate:"required,min=8,max=64"`
+	Timezone string `json:"timezone" validate:"required,max=64"`
 }
 
 type LoginDTO struct {

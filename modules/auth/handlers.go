@@ -24,6 +24,8 @@ func RegisterHandler(c fiber.Ctx) error {
 		})
 	}
 
+	data.Timezone = strings.TrimSpace(data.Timezone)
+
 	if err := utils.Validate.Struct(data); err != nil {
 		var messages []string
 		valErrs := err.(validator.ValidationErrors)
@@ -47,12 +49,20 @@ func RegisterHandler(c fiber.Ctx) error {
 		})
 	}
 
+	loc, err := time.LoadLocation(data.Timezone)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Invalid timezone",
+		})
+	}
+
 	user := User{
 		Name:         data.Name,
 		Surname:      data.Surname,
 		PasswordHash: string(hashedPass),
 		Email:        data.Email,
 		LastLoginAt:  time.Now(),
+		Timezone:     loc.String(),
 	}
 
 	tx := database.Create(&user)
