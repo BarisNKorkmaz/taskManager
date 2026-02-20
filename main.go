@@ -5,6 +5,7 @@ import (
 
 	"github.com/BarisNKorkmaz/taskManager/database"
 	"github.com/BarisNKorkmaz/taskManager/middleware"
+	"github.com/BarisNKorkmaz/taskManager/modules/auth"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	recoverer "github.com/gofiber/fiber/v3/middleware/recover"
@@ -17,7 +18,7 @@ func main() {
 	middleware.Log.Info("Logger initialized.")
 
 	if err := godotenv.Load(); err != nil {
-		middleware.Log.Error("Error loading .env file")
+		middleware.Log.Error("Error loading .env file", "err", err)
 	}
 
 	if err := database.Connect(); err != nil {
@@ -27,12 +28,26 @@ func main() {
 		middleware.Log.Info("Database connected.")
 	}
 
+	if err := database.DB.AutoMigrate(&auth.User{}); err != nil {
+		middleware.Log.Error("Migration error:", "err", err.Error())
+	} else {
+		middleware.Log.Info("Database migrated")
+	}
+
 	app := fiber.New()
 	app.Use(recoverer.New())
 	app.Use(logger.New())
 
 	app.Get("/", helloWorld)
 	app.Get("/panictest", hPanic)
+	app.Post("/register", auth.RegisterHandler)
+	app.Post("/login", auth.LoginHandler)
+	app.Get("/test/me", auth.JWTMiddleware(), func(c fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"userID": c.Locals("userID"),
+			"email":  c.Locals("email"),
+		})
+	})
 
 	port := os.Getenv("APP_PORT")
 	if port == "" {
