@@ -6,6 +6,7 @@ import (
 	"github.com/BarisNKorkmaz/taskManager/database"
 	"github.com/BarisNKorkmaz/taskManager/middleware"
 	"github.com/BarisNKorkmaz/taskManager/modules/auth"
+	"github.com/BarisNKorkmaz/taskManager/modules/task"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	recoverer "github.com/gofiber/fiber/v3/middleware/recover"
@@ -28,7 +29,7 @@ func main() {
 		middleware.Log.Info("Database connected.")
 	}
 
-	if err := database.DB.AutoMigrate(&auth.User{}); err != nil {
+	if err := database.DB.AutoMigrate(&auth.User{}, &task.TaskTemplate{}); err != nil {
 		middleware.Log.Error("Migration error:", "err", err.Error())
 	} else {
 		middleware.Log.Info("Database migrated")
