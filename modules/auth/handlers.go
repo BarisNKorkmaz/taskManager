@@ -65,7 +65,7 @@ func RegisterHandler(c fiber.Ctx) error {
 		Timezone:     loc.String(),
 	}
 
-	tx := database.Create(&user)
+	tx := database.Create(database.DB, &user, &User{})
 	if tx.Error != nil {
 		if strings.Contains(tx.Error.Error(), "SQLSTATE 23505") {
 			return c.Status(409).JSON(fiber.Map{

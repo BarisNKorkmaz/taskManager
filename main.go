@@ -29,7 +29,7 @@ func main() {
 		middleware.Log.Info("Database connected.")
 	}
 
-	if err := database.DB.AutoMigrate(&auth.User{}, &task.TaskTemplate{}); err != nil {
+	if err := database.DB.AutoMigrate(&auth.User{}, &task.TaskTemplate{}, &task.TaskOccurrence{}); err != nil {
 		middleware.Log.Error("Migration error:", "err", err.Error())
 	} else {
 		middleware.Log.Info("Database migrated")
@@ -43,9 +43,12 @@ func main() {
 	app.Get("/panictest", hPanic)
 	app.Post("/register", auth.RegisterHandler)
 	app.Post("/login", auth.LoginHandler)
+	app.Post("/create", auth.JWTMiddleware(), task.CreateTaskTemplateHandler)
+	app.Get("/home", auth.JWTMiddleware(), task.GetWeeklyTaskHandler)
+
 	app.Get("/test/me", auth.JWTMiddleware(), func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{
-			"userID": c.Locals("userID"),
+			"userID": c.Locals("userId"),
 			"email":  c.Locals("email"),
 		})
 	})
