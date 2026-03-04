@@ -159,6 +159,8 @@ func GetWeeklyTaskHandler(c fiber.Ctx) error {
 	weekEnd := datetime.EndOfWeek(*now, time.Sunday)
 	monthEnd := datetime.EndOfMonth(*now)
 
+	fmt.Printf("now: %s, weekend: %s, monthend: %s", now.String(), weekEnd.String(), monthEnd.String())
+
 	var taskTemplates []TaskTemplate
 	if tx := database.FetchTasksByUID(uid, &TaskTemplate{}, &taskTemplates); tx.Error != nil {
 		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
@@ -276,9 +278,8 @@ func GetWeeklyTaskHandler(c fiber.Ctx) error {
 			IsCompleted: false,
 		})
 	}
-
-	for _, occurence := range missingOccurrence {
-		if tx := database.Create(database.DB, &occurence, &TaskOccurrence{}); tx.Error != nil {
+	if len(missingOccurrence) == 0 {
+		if tx := database.CreateOccurrencesBatch(database.DB, missingOccurrence, &TaskOccurrence{}, 200); tx.Error != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"message": "Server error",
 				"error":   tx.Error.Error(),
