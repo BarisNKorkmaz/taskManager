@@ -45,6 +45,7 @@ func main() {
 	app.Post("/login", auth.LoginHandler)
 	app.Post("/create", auth.JWTMiddleware(), task.CreateTaskTemplateHandler)
 	app.Get("/home", auth.JWTMiddleware(), task.GetWeeklyTaskHandler)
+	app.Post("/tasks/occurrence/:id/action", auth.JWTMiddleware(), task.UpdateOccStatusHandler)
 
 	app.Get("/test/me", auth.JWTMiddleware(), func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{

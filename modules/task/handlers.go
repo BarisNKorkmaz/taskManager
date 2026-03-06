@@ -3,6 +3,7 @@ package task
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -342,5 +343,122 @@ func getLocalDate(user auth.User) *time.Time {
 		dateOnly := time.Date(year, month, day, 0, 0, 0, 0, loc)
 		return &dateOnly
 	}
+
+}
+
+// TODO endpoint: POST /tasks/occurrence/:id/action
+func UpdateOccStatusHandler(c fiber.Ctx) error {
+
+	occIdStr := c.Params("id")
+	occId64, uintParseErr := strconv.ParseUint(occIdStr, 10, 64)
+	if uintParseErr != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   uintParseErr.Error(),
+		})
+	}
+	uid := c.Locals("userId").(uint)
+	data := new(TaskActionDTO)
+
+	if err := c.Bind().Body(data); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   err.Error(),
+		})
+	}
+
+	if err := utils.Validate.Struct(data); err != nil {
+		var messages []string
+		ValErrs := err.(validator.ValidationErrors)
+
+		for _, valErr := range ValErrs {
+			messages = append(messages, fmt.Sprintf("Field: %s, failed on: %s, on your value: %v", valErr.Field(), valErr.Tag(), valErr.Value()))
+		}
+
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   messages,
+		})
+	}
+
+	user := new(auth.User)
+	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+	now := getLocalDate(*user)
+	action := strings.ToLower(data.Action)
+	if action == "reschedule" {
+		if data.NewDueDate == nil || !data.NewDueDate.After(*now) {
+			return c.Status(400).JSON(fiber.Map{
+				"message": "Bad request",
+				"error":   "newDueDate must be a future date for reschedule",
+			})
+		}
+	}
+	occ := new(TaskOccurrence)
+	if tx := database.FetchOccurenceByOccId(&TaskOccurrence{}, occId64, uid, occ); tx.Error != nil {
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			return c.Status(404).JSON(fiber.Map{
+				"message": "Not found",
+				"error":   tx.Error.Error(),
+			})
+		}
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	var resMessage string
+
+	switch action {
+	case "complete":
+
+		occ.IsCompleted = true
+		occ.CompletedAt = now
+
+		resMessage = "task completed"
+
+	case "undo":
+		occ.IsCompleted = false
+		occ.CompletedAt = nil
+
+		resMessage = "task completion undone"
+
+	case "skip":
+		occ.IsCompleted = true
+		occ.CompletedAt = now
+
+		resMessage = "task skipped"
+
+	case "reschedule":
+		occ.DueDate = *data.NewDueDate
+
+		resMessage = "task rescheduled"
+	}
+
+	if tx := database.UpdateOccStatus(&TaskOccurrence{}, occId64, occ); tx.Error != nil || tx.RowsAffected == 0 {
+		if errors.Is(tx.Error, gorm.ErrDuplicatedKey) {
+			return c.Status(409).JSON(fiber.Map{
+				"message": "Conflict",
+				"error":   "another occurrence already exists for this task on the selected date",
+			})
+		}
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"message":      resMessage,
+		"occurrenceId": occ.ID,
+		"status":       occ.IsCompleted,
+		"dueDate":      occ.DueDate,
+		"completedAt":  occ.CompletedAt,
+	})
 
 }

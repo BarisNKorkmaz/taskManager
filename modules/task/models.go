@@ -47,3 +47,8 @@ type TaskDTO struct {
 	RepeatInterval *int       `json:"repeatInterval" validate:"omitempty,min=1"`
 	StartDate      *time.Time `json:"startDate" validate:"omitempty"`
 }
+
+type TaskActionDTO struct {
+	Action     string     `json:"action" validate:"required,oneof=complete undo skip reschedule"`
+	NewDueDate *time.Time `json:"newDueDate,omitempty"`
+}

@@ -37,3 +37,11 @@ func FetchUncompletedOccurrences(userId uint, model any, dest any, finalDate tim
 func CreateOccurrencesBatch(database *gorm.DB, occs any, model any, batchSize int) *gorm.DB {
 	return database.Model(model).CreateInBatches(occs, batchSize)
 }
+
+func FetchOccurenceByOccId(model any, occId any, userId uint, dest any) *gorm.DB {
+	return DB.Model(model).Where("id = ? AND user_id = ?", occId, userId).First(dest)
+}
+
+func UpdateOccStatus(model any, occId any, value any) *gorm.DB {
+	return DB.Model(model).Where("id = ?", occId).Select("is_completed", "completed_at", "due_date").Updates(value)
+}
