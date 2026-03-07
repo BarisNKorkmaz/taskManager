@@ -52,3 +52,16 @@ type TaskActionDTO struct {
 	Action     string     `json:"action" validate:"required,oneof=complete undo skip reschedule"`
 	NewDueDate *time.Time `json:"newDueDate,omitempty"`
 }
+
+type UpdateTemplateDTO struct {
+	Title       *string `json:"title" validate:"omitempty,min=1,max=120"`
+	Description *string `json:"description,omitempty" validate:"omitempty,max=255"`
+
+	// Eğer gönderilirse geçerli bir tarih olmalı
+	DueDate *time.Time `json:"dueDate,omitempty" validate:"omitempty"`
+
+	// Tekrar ayarları gönderilirse kurallara uymalı
+	RepeatUnit     *string    `json:"repeatUnit,omitempty" validate:"omitempty,oneof=day week month"`
+	RepeatInterval *int       `json:"repeatInterval,omitempty" validate:"omitempty,gt=0"`
+	StartDate      *time.Time `json:"startDate,omitempty" validate:"omitempty"`
+}

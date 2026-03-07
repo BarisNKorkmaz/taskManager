@@ -3,6 +3,7 @@ package task
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -144,7 +145,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 
 }
 
-func GetWeeklyTaskHandler(c fiber.Ctx) error {
+func DashboardHandler(c fiber.Ctx) error {
 
 	user := new(auth.User)
 	uid := c.Locals("userId").(uint)
@@ -346,7 +347,6 @@ func getLocalDate(user auth.User) *time.Time {
 
 }
 
-// TODO endpoint: POST /tasks/occurrence/:id/action
 func UpdateOccStatusHandler(c fiber.Ctx) error {
 
 	occIdStr := c.Params("id")
@@ -461,4 +461,171 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 		"completedAt":  occ.CompletedAt,
 	})
 
+}
+
+func UpdateTaskTemplateHandler(c fiber.Ctx) error {
+	data := new(UpdateTemplateDTO)
+	uid := c.Locals("userId").(uint)
+	taskIdStr := c.Params("id")
+	taskId, parseErr := strconv.ParseUint(taskIdStr, 10, 64)
+	if parseErr != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   parseErr.Error(),
+		})
+	}
+
+	if err := c.Bind().Body(data); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   err.Error(),
+		})
+	}
+
+	if err := utils.Validate.Struct(data); err != nil {
+		var messages []string
+		valErrs := err.(validator.ValidationErrors)
+
+		for _, valErr := range valErrs {
+			messages = append(messages, fmt.Sprintf("Field: %s, failed on: %s, on your value: %v", valErr.Field(), valErr.Tag(), valErr.Value()))
+		}
+
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   messages,
+		})
+	}
+
+	if data.Description == nil && data.DueDate == nil && data.RepeatInterval == nil && data.RepeatUnit == nil && data.StartDate == nil && data.Title == nil {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   "Invalid request payload. Please check your data format.",
+		})
+	}
+
+	template := new(TaskTemplate)
+	if tx := database.FetchTaskTemplateById(&TaskTemplate{}, taskId, uid, template); tx.Error != nil {
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			return c.Status(404).JSON(fiber.Map{
+				"message": "Not found",
+				"error":   tx.Error.Error(),
+			})
+		}
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	if template.IsRepeatEnabled {
+		data.DueDate = nil
+	} else {
+		data.RepeatInterval = nil
+		data.RepeatUnit = nil
+		data.StartDate = nil
+	}
+
+	user := new(auth.User)
+
+	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	now := getLocalDate(*user)
+
+	updates := StructToUpdateMap(data)
+
+	shouldDeleteFutureOccs := data.DueDate != nil ||
+		data.RepeatUnit != nil ||
+		data.RepeatInterval != nil ||
+		data.StartDate != nil
+
+	atomicDB := database.DB.Begin()
+	if tx := database.UpdateTaskTemplate(atomicDB, &TaskTemplate{}, taskId, uid, updates); tx.Error != nil {
+		atomicDB.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+	if shouldDeleteFutureOccs {
+		if tx := database.DeleteChangedOccs(atomicDB, &TaskOccurrence{}, taskId, *now, uid); tx.Error != nil {
+			atomicDB.Rollback()
+			return c.Status(500).JSON(fiber.Map{
+				"message": "Server error",
+				"error":   tx.Error.Error(),
+			})
+		}
+
+		if template.IsRepeatEnabled == false {
+			occ := TaskOccurrence{
+				TaskID:      template.ID,
+				UserID:      uid,
+				DueDate:     *template.DueDate,
+				IsCompleted: false,
+			}
+
+			if tx := database.Create(atomicDB, &occ, &TaskOccurrence{}); tx.Error != nil {
+				atomicDB.Rollback()
+				return c.Status(500).JSON(fiber.Map{
+					"message": "Server error",
+					"error":   tx.Error.Error(),
+				})
+			}
+
+		}
+	}
+
+	if res := atomicDB.Commit(); res.Error != nil {
+		atomicDB.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   res.Error.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"message": "Task template successfully updated",
+		"taskId":  taskIdStr,
+	})
+
+}
+
+func StructToUpdateMap(data interface{}) map[string]any {
+	update := make(map[string]any)
+
+	v := reflect.ValueOf(data)
+	t := reflect.TypeOf(data)
+
+	// Eğer data bir pointer ise asıl objeye git (Dereference)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+		t = t.Elem()
+	}
+
+	for i := 0; i < v.NumField(); i++ {
+		fieldVal := v.Field(i)  // Alanın değeri
+		fieldType := t.Field(i) // Alanın meta verisi (Tag vb.)
+
+		// Sadece pointer olan ve nil olmayan alanları kontrol et
+		if fieldVal.Kind() == reflect.Ptr {
+			if !fieldVal.IsNil() {
+				// JSON tag'ini anahtar olarak al, yoksa field ismini kullan
+				key := fieldType.Tag.Get("json")
+				if key == "" || key == "-" {
+					key = fieldType.Name
+				} else {
+					// "title,omitempty" gibi durumlarda virgül sonrasını at
+					key = strings.Split(key, ",")[0]
+				}
+
+				// Pointer'ın gösterdiği asıl değeri map'e ekle
+				update[key] = fieldVal.Elem().Interface()
+			}
+		}
+	}
+	return update
 }
