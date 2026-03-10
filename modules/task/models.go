@@ -65,3 +65,7 @@ type UpdateTemplateDTO struct {
 	RepeatInterval *int       `json:"repeatInterval,omitempty" validate:"omitempty,gt=0"`
 	StartDate      *time.Time `json:"startDate,omitempty" validate:"omitempty"`
 }
+
+type SetTemplateStatusDTO struct {
+	IsActive *bool `json:"isActive" validate:"required"`
+}

@@ -280,7 +280,7 @@ func DashboardHandler(c fiber.Ctx) error {
 			IsCompleted: false,
 		})
 	}
-	if len(missingOccurrence) == 0 {
+	if len(missingOccurrence) > 0 {
 		if tx := database.CreateOccurrencesBatch(database.DB, missingOccurrence, &TaskOccurrence{}, 200); tx.Error != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"message": "Server error",
@@ -423,6 +423,12 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 		resMessage = "task completed"
 
 	case "undo":
+		if occ.IsCompleted {
+			return c.Status(409).JSON(fiber.Map{
+				"message": "Conflict",
+				"error":   "occurrence is already pending",
+			})
+		}
 		occ.IsCompleted = false
 		occ.CompletedAt = nil
 
@@ -438,6 +444,14 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 		occ.DueDate = *data.NewDueDate
 
 		resMessage = "task rescheduled"
+
+	default:
+
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   "action is must be one of = complete undo skip reschedule",
+		})
+
 	}
 
 	if tx := database.UpdateOccStatus(&TaskOccurrence{}, occId64, occ); tx.Error != nil || tx.RowsAffected == 0 {
@@ -455,6 +469,7 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 
 	return c.Status(200).JSON(fiber.Map{
 		"message":      resMessage,
+		"action":       action,
 		"occurrenceId": occ.ID,
 		"status":       occ.IsCompleted,
 		"dueDate":      occ.DueDate,
@@ -560,7 +575,16 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 			})
 		}
 
-		if template.IsRepeatEnabled == false {
+		if !template.IsRepeatEnabled {
+
+			if tx := database.FetchTaskTemplateById(&TaskTemplate{}, taskId, uid, template); tx.Error != nil {
+				atomicDB.Rollback()
+				return c.Status(500).JSON(fiber.Map{
+					"message": "Server error",
+					"error":   tx.Error.Error(),
+				})
+			}
+
 			occ := TaskOccurrence{
 				TaskID:      template.ID,
 				UserID:      uid,
@@ -589,7 +613,7 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 
 	return c.Status(200).JSON(fiber.Map{
 		"message": "Task template successfully updated",
-		"taskId":  taskIdStr,
+		"taskId":  taskId,
 	})
 
 }
@@ -628,4 +652,127 @@ func StructToUpdateMap(data interface{}) map[string]any {
 		}
 	}
 	return update
+}
+
+func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
+	data := new(SetTemplateStatusDTO)
+	TaskIdStr := c.Params("id")
+	taskId, parseErr := strconv.ParseUint(TaskIdStr, 10, 64)
+	if parseErr != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   parseErr.Error(),
+		})
+	}
+
+	uid := c.Locals("userId").(uint)
+
+	if err := c.Bind().Body(data); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   err.Error(),
+		})
+	}
+
+	if valErr := utils.Validate.Struct(data); valErr != nil {
+		var messages []string
+		valErrs := valErr.(validator.ValidationErrors)
+		for _, err := range valErrs {
+			messages = append(messages, fmt.Sprintf("Field: %s, failed on: %s, on your value: %v", err.Field(), err.Tag(), err.Value()))
+		}
+
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   messages,
+		})
+	}
+
+	template := new(TaskTemplate)
+
+	if tx := database.FetchTaskTemplateById(&TaskTemplate{}, taskId, uid, template); tx.Error != nil {
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			return c.Status(404).JSON(fiber.Map{
+				"message": "Not found",
+				"error":   tx.Error.Error(),
+			})
+		}
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	if template.IsActive == *data.IsActive {
+		return c.Status(200).JSON(fiber.Map{
+			"message":  "Task status already set",
+			"taskId":   taskId,
+			"isActive": template.IsActive,
+		})
+	}
+
+	update := map[string]any{
+		"is_active": data.IsActive,
+	}
+
+	user := new(auth.User)
+
+	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	now := getLocalDate(*user)
+
+	atomicDb := database.DB.Begin()
+	if tx := database.UpdateTaskTemplate(atomicDb, &TaskTemplate{}, taskId, uid, update); tx.Error != nil {
+		atomicDb.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	if !(*data.IsActive) {
+		if tx := database.DeleteChangedOccs(atomicDb, &TaskOccurrence{}, taskId, *now, uid); tx.Error != nil {
+			atomicDb.Rollback()
+			return c.Status(500).JSON(fiber.Map{
+				"message": "Server error",
+				"error":   tx.Error.Error(),
+			})
+		}
+	} else {
+		if !template.IsRepeatEnabled && !template.DueDate.Before(*now) {
+			occ := &TaskOccurrence{
+				TaskID:      template.ID,
+				UserID:      uid,
+				DueDate:     *template.DueDate,
+				IsCompleted: false,
+			}
+
+			if tx := database.Create(atomicDb, occ, &TaskOccurrence{}); tx.Error != nil {
+				atomicDb.Rollback()
+				return c.Status(500).JSON(fiber.Map{
+					"message": "Server error",
+					"error":   tx.Error.Error(),
+				})
+			}
+		}
+	}
+
+	if res := atomicDb.Commit(); res.Error != nil {
+		atomicDb.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   res.Error.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"message":  "Task status successfully changed",
+		"taskId":   taskId,
+		"isActive": data.IsActive,
+	})
+
 }
