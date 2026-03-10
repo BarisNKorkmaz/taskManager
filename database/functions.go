@@ -57,3 +57,7 @@ func UpdateTaskTemplate(database *gorm.DB, model any, taskId any, userId uint, v
 func DeleteChangedOccs(database *gorm.DB, model any, taskId any, now time.Time, userId uint) *gorm.DB {
 	return database.Model(model).Where("task_id = ? AND user_id = ? AND due_date >= ? AND is_completed = ?", taskId, userId, now, false).Delete(model)
 }
+
+func FetchTaskTemplates(model any, userId uint, dest any) *gorm.DB {
+	return DB.Model(model).Where("user_id = ?", userId).Order("created_at DESC").Find(dest)
+}

@@ -776,3 +776,36 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 	})
 
 }
+
+func GetTaskTemplates(c fiber.Ctx) error {
+	uid := c.Locals("userId").(uint)
+
+	var templates []TaskTemplate
+	var activeTemplates []TaskTemplate
+	var inactiveTemplates []TaskTemplate
+
+	if tx := database.FetchTaskTemplates(&TaskTemplate{}, uid, &templates); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	for _, template := range templates {
+		if template.IsActive {
+			activeTemplates = append(activeTemplates, template)
+		} else {
+			inactiveTemplates = append(inactiveTemplates, template)
+		}
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"message":               "Task templates fetched successfully",
+		"activeTemplates":       activeTemplates,
+		"inactiveTemplates":     inactiveTemplates,
+		"activeTemplateCount":   len(activeTemplates),
+		"inactiveTemplateCount": len(inactiveTemplates),
+		"templateCount":         len(templates),
+	})
+
+}
