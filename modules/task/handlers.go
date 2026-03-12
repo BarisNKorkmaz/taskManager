@@ -165,128 +165,19 @@ func DashboardHandler(c fiber.Ctx) error {
 
 	var taskTemplates []TaskTemplate
 	if tx := database.FetchTasksByUID(uid, &TaskTemplate{}, &taskTemplates); tx.Error != nil {
-		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-			return c.Status(404).JSON(fiber.Map{
-				"message": "Task template not found",
-				"error":   tx.Error.Error(),
-			})
-		}
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
 		})
 	}
 
-	type OccKey struct {
-		TaskID  uint
-		DueDate time.Time
-	}
+	taskTemplatesMap, generateErr := generateOcc(taskTemplates, uid, *now, monthEnd)
 
-	var wantedOccurrence []OccKey
-	for _, template := range taskTemplates {
-
-		if !template.IsRepeatEnabled || !template.IsActive {
-			continue
-		}
-		if template.RepeatUnit == nil || template.StartDate == nil || template.RepeatInterval == nil {
-			continue
-		}
-		if *template.RepeatInterval <= 0 {
-			continue
-		}
-
-		switch strings.ToLower(*template.RepeatUnit) {
-
-		case "day":
-
-			dueDate := *template.StartDate
-
-			for dueDate.Before(*now) {
-				dueDate = dueDate.AddDate(0, 0, *template.RepeatInterval)
-			}
-
-			for !dueDate.After(monthEnd) {
-				wantedOccurrence = append(wantedOccurrence, OccKey{
-					TaskID:  template.ID,
-					DueDate: dueDate,
-				})
-				dueDate = dueDate.AddDate(0, 0, *template.RepeatInterval)
-			}
-
-		case "week":
-
-			dueDate := *template.StartDate
-
-			for dueDate.Before(*now) {
-				dueDate = dueDate.AddDate(0, 0, 7*(*template.RepeatInterval))
-			}
-
-			for !dueDate.After(monthEnd) {
-				wantedOccurrence = append(wantedOccurrence, OccKey{
-					TaskID:  template.ID,
-					DueDate: dueDate,
-				})
-				dueDate = dueDate.AddDate(0, 0, 7*(*template.RepeatInterval))
-			}
-
-		case "month":
-			dueDate := *template.StartDate
-
-			for dueDate.Before(*now) {
-				dueDate = dueDate.AddDate(0, *template.RepeatInterval, 0)
-			}
-
-			for !dueDate.After(monthEnd) {
-				wantedOccurrence = append(wantedOccurrence, OccKey{
-					TaskID:  template.ID,
-					DueDate: dueDate,
-				})
-				dueDate = dueDate.AddDate(0, *template.RepeatInterval, 0)
-			}
-
-		}
-
-	}
-
-	var existingOccurence []OccKey
-
-	if tx := database.FetchOccurenceByUID(uid, &TaskOccurrence{}, &existingOccurence, *now, monthEnd); tx.Error != nil {
+	if generateErr != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
-			"error":   tx.Error.Error(),
+			"error":   generateErr.Error(),
 		})
-	}
-
-	existingSet := make(map[string]struct{}, len(existingOccurence))
-
-	for _, e := range existingOccurence {
-		key := fmt.Sprintf("%d|%s", e.TaskID, e.DueDate.Format("2006-01-02"))
-		existingSet[key] = struct{}{}
-	}
-
-	var missingOccurrence []TaskOccurrence
-
-	for _, wanted := range wantedOccurrence {
-		key := fmt.Sprintf("%d|%s", wanted.TaskID, wanted.DueDate.Format("2006-01-02"))
-
-		if _, ok := existingSet[key]; ok {
-			continue
-		}
-
-		missingOccurrence = append(missingOccurrence, TaskOccurrence{
-			TaskID:      wanted.TaskID,
-			UserID:      uid,
-			DueDate:     wanted.DueDate,
-			IsCompleted: false,
-		})
-	}
-	if len(missingOccurrence) > 0 {
-		if tx := database.CreateOccurrencesBatch(database.DB, missingOccurrence, &TaskOccurrence{}, 200); tx.Error != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"message": "Server error",
-				"error":   tx.Error.Error(),
-			})
-		}
 	}
 
 	var uncompletedOcc []TaskOccurrence
@@ -298,17 +189,38 @@ func DashboardHandler(c fiber.Ctx) error {
 		})
 	}
 
-	overdue := make([]TaskOccurrence, 0)
-	thisWeek := make([]TaskOccurrence, 0)
-	thisMonth := make([]TaskOccurrence, 0)
+	overdue := make([]DashboardOccurrenceDTO, 0)
+	thisWeek := make([]DashboardOccurrenceDTO, 0)
+	thisMonth := make([]DashboardOccurrenceDTO, 0)
 
 	for _, occ := range uncompletedOcc {
 		if occ.DueDate.Before(*now) {
-			overdue = append(overdue, occ)
+			overdue = append(overdue, DashboardOccurrenceDTO{
+				ID:          occ.ID,
+				TaskID:      occ.TaskID,
+				Title:       taskTemplatesMap[occ.TaskID].Title,
+				Description: taskTemplatesMap[occ.TaskID].Description,
+				DueDate:     occ.DueDate,
+				IsCompleted: occ.IsCompleted,
+			})
 		} else if !occ.DueDate.After(weekEnd) {
-			thisWeek = append(thisWeek, occ)
+			thisWeek = append(thisWeek, DashboardOccurrenceDTO{
+				ID:          occ.ID,
+				TaskID:      occ.TaskID,
+				Title:       taskTemplatesMap[occ.TaskID].Title,
+				Description: taskTemplatesMap[occ.TaskID].Description,
+				DueDate:     occ.DueDate,
+				IsCompleted: occ.IsCompleted,
+			})
 		} else {
-			thisMonth = append(thisMonth, occ)
+			thisMonth = append(thisMonth, DashboardOccurrenceDTO{
+				ID:          occ.ID,
+				TaskID:      occ.TaskID,
+				Title:       taskTemplatesMap[occ.TaskID].Title,
+				Description: taskTemplatesMap[occ.TaskID].Description,
+				DueDate:     occ.DueDate,
+				IsCompleted: occ.IsCompleted,
+			})
 		}
 	}
 
@@ -777,7 +689,7 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 
 }
 
-func GetTaskTemplates(c fiber.Ctx) error {
+func GetTaskTemplatesHandler(c fiber.Ctx) error {
 	uid := c.Locals("userId").(uint)
 
 	var templates []TaskTemplate
@@ -806,6 +718,236 @@ func GetTaskTemplates(c fiber.Ctx) error {
 		"activeTemplateCount":   len(activeTemplates),
 		"inactiveTemplateCount": len(inactiveTemplates),
 		"templateCount":         len(templates),
+	})
+
+}
+
+// GET /taskTemplates/:id
+func GetTemplateDetailHandler(c fiber.Ctx) error {
+	uid := c.Locals("userId").(uint)
+	templateIdStr := c.Params("id")
+	templateId, ok := strconv.ParseUint(templateIdStr, 10, 64)
+	if ok != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   ok.Error(),
+		})
+	}
+
+	template := new(TaskTemplate)
+
+	if tx := database.FetchTaskTemplateById(&TaskTemplate{}, templateId, uid, template); tx.Error != nil {
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			return c.Status(404).JSON(fiber.Map{
+				"message": "Record not fount",
+				"error":   tx.Error.Error(),
+			})
+		}
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"message": "Task template fetched successfully",
+		"data":    template,
+	})
+
+}
+
+func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd time.Time) (map[uint]TaskTemplate, error) {
+	type OccKey struct {
+		TaskID  uint
+		DueDate time.Time
+	}
+
+	taskTemplatesMap := make(map[uint]TaskTemplate)
+
+	var wantedOccurrence []OccKey
+	for _, template := range taskTemplates {
+
+		taskTemplatesMap[template.ID] = template
+
+		if !template.IsRepeatEnabled || !template.IsActive {
+			continue
+		}
+		if template.RepeatUnit == nil || template.StartDate == nil || template.RepeatInterval == nil {
+			continue
+		}
+		if *template.RepeatInterval <= 0 {
+			continue
+		}
+
+		switch strings.ToLower(*template.RepeatUnit) {
+
+		case "day":
+
+			dueDate := *template.StartDate
+
+			for dueDate.Before(now) {
+				dueDate = dueDate.AddDate(0, 0, *template.RepeatInterval)
+			}
+
+			for !dueDate.After(monthEnd) {
+				wantedOccurrence = append(wantedOccurrence, OccKey{
+					TaskID:  template.ID,
+					DueDate: dueDate,
+				})
+				dueDate = dueDate.AddDate(0, 0, *template.RepeatInterval)
+			}
+
+		case "week":
+
+			dueDate := *template.StartDate
+
+			for dueDate.Before(now) {
+				dueDate = dueDate.AddDate(0, 0, 7*(*template.RepeatInterval))
+			}
+
+			for !dueDate.After(monthEnd) {
+				wantedOccurrence = append(wantedOccurrence, OccKey{
+					TaskID:  template.ID,
+					DueDate: dueDate,
+				})
+				dueDate = dueDate.AddDate(0, 0, 7*(*template.RepeatInterval))
+			}
+
+		case "month":
+			dueDate := *template.StartDate
+
+			for dueDate.Before(now) {
+				dueDate = dueDate.AddDate(0, *template.RepeatInterval, 0)
+			}
+
+			for !dueDate.After(monthEnd) {
+				wantedOccurrence = append(wantedOccurrence, OccKey{
+					TaskID:  template.ID,
+					DueDate: dueDate,
+				})
+				dueDate = dueDate.AddDate(0, *template.RepeatInterval, 0)
+			}
+
+		}
+
+	}
+
+	var existingOccurence []OccKey
+
+	if tx := database.FetchOccurenceByUID(uid, &TaskOccurrence{}, &existingOccurence, now, monthEnd); tx.Error != nil {
+		return nil, tx.Error
+	}
+
+	existingSet := make(map[string]struct{}, len(existingOccurence))
+
+	for _, e := range existingOccurence {
+		key := fmt.Sprintf("%d|%s", e.TaskID, e.DueDate.Format("2006-01-02"))
+		existingSet[key] = struct{}{}
+	}
+
+	var missingOccurrence []TaskOccurrence
+
+	for _, wanted := range wantedOccurrence {
+		key := fmt.Sprintf("%d|%s", wanted.TaskID, wanted.DueDate.Format("2006-01-02"))
+
+		if _, ok := existingSet[key]; ok {
+			continue
+		}
+
+		missingOccurrence = append(missingOccurrence, TaskOccurrence{
+			TaskID:      wanted.TaskID,
+			UserID:      uid,
+			DueDate:     wanted.DueDate,
+			IsCompleted: false,
+		})
+	}
+	if len(missingOccurrence) > 0 {
+		if tx := database.CreateOccurrencesBatch(database.DB, missingOccurrence, &TaskOccurrence{}, 200); tx.Error != nil {
+			return nil, tx.Error
+		}
+	}
+
+	return taskTemplatesMap, nil
+}
+
+func GetTodayOccs(c fiber.Ctx) error {
+	uid := c.Locals("userId").(uint)
+
+	user := new(auth.User)
+
+	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	today := getLocalDate(*user)
+	monthEnd := datetime.EndOfMonth(*today)
+
+	var taskTemplates []TaskTemplate
+	var taskTemplatesMap map[uint]TaskTemplate
+
+	if tx := database.FetchTaskTemplates(&TaskTemplate{}, uid, &taskTemplates); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	taskTemplatesMap, generateErr := generateOcc(taskTemplates, uid, *today, monthEnd)
+
+	if generateErr != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   generateErr.Error(),
+		})
+	}
+
+	var uncompletedOcc []TaskOccurrence
+
+	if tx := database.FetchUncompletedOccurrences(uid, &TaskOccurrence{}, &uncompletedOcc, *today); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	overdue := make([]DashboardOccurrenceDTO, 0)
+	todayOccs := make([]DashboardOccurrenceDTO, 0)
+
+	for _, occ := range uncompletedOcc {
+
+		if occ.DueDate.Before(*today) {
+			overdue = append(overdue, DashboardOccurrenceDTO{
+				ID:          occ.ID,
+				TaskID:      occ.TaskID,
+				Title:       taskTemplatesMap[occ.TaskID].Title,
+				Description: taskTemplatesMap[occ.TaskID].Description,
+				DueDate:     occ.DueDate,
+				IsCompleted: occ.IsCompleted,
+			})
+		} else if occ.DueDate.Equal(*today) {
+			todayOccs = append(todayOccs, DashboardOccurrenceDTO{
+				ID:          occ.ID,
+				TaskID:      occ.TaskID,
+				Title:       taskTemplatesMap[occ.TaskID].Title,
+				Description: taskTemplatesMap[occ.TaskID].Description,
+				DueDate:     occ.DueDate,
+				IsCompleted: occ.IsCompleted,
+			})
+		}
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"today":   todayOccs,
+		"overDue": overdue,
+		"now":     today,
+
+		"counts": fiber.Map{
+			"overdue": len(overdue),
+			"today":   len(todayOccs),
+		},
 	})
 
 }

@@ -1,0 +1,9 @@
+CreateTaskTemplateHandler repeatable veya on shot task oluşturur
+DashboardHandler overdue, hafta sonuna kadar ve ay sonuna kadar duedate'i bulunan occ'leri döner
+UpdateOccStatusHandler  occ için complete undo skip reschedule işlemi yapar
+UpdateTaskTemplateHandler taskTemplate için tittle, desc alanlarını; repeatablelar için RepeatUnit, RepeatInterval, StartDate alanlarını; one shot için dueDate alanını günceller
+SetTaskTemplateStatusHandler task template için isactive değerini günceller
+GetTaskTemplatesHandler kullanıcıya ait taskTemplateleri aktif inaktif ayrımı ile döner
+LoginHandler kullanıcı girişi
+RegisterHandler kullanıcı oluşturma
+

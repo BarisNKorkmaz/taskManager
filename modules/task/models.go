@@ -69,3 +69,12 @@ type UpdateTemplateDTO struct {
 type SetTemplateStatusDTO struct {
 	IsActive *bool `json:"isActive" validate:"required"`
 }
+
+type DashboardOccurrenceDTO struct {
+	ID          uint      `json:"id"`
+	TaskID      uint      `json:"taskId"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	DueDate     time.Time `json:"dueDate"`
+	IsCompleted bool      `json:"isCompleted"`
+}

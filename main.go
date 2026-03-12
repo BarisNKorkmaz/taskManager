@@ -48,7 +48,9 @@ func main() {
 	app.Post("/tasks/occurrence/:id/action", auth.JWTMiddleware(), task.UpdateOccStatusHandler)
 	app.Post("/tasks/templates/:id/update", auth.JWTMiddleware(), task.UpdateTaskTemplateHandler)
 	app.Patch("/task-template/:id/status", auth.JWTMiddleware(), task.SetTaskTemplateStatusHandler)
-	app.Get("/task-templates", auth.JWTMiddleware(), task.GetTaskTemplates)
+	app.Get("/task-templates", auth.JWTMiddleware(), task.GetTaskTemplatesHandler)
+	app.Get("/taskTemplates/:id", auth.JWTMiddleware(), task.GetTemplateDetailHandler)
+	app.Get("/today", auth.JWTMiddleware(), task.GetTodayOccs)
 
 	app.Get("/test/me", auth.JWTMiddleware(), func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{
