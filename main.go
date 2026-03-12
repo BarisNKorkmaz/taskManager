@@ -38,26 +38,25 @@ func main() {
 	app := fiber.New()
 	app.Use(recoverer.New())
 	app.Use(logger.New())
+	app.Get("/health", database.HealthHandler)
 
-	app.Get("/", helloWorld)
-	app.Get("/panictest", hPanic)
-	app.Post("/register", auth.RegisterHandler)
-	app.Post("/login", auth.LoginHandler)
-	app.Post("/create", auth.JWTMiddleware(), task.CreateTaskTemplateHandler)
-	app.Get("/home", auth.JWTMiddleware(), task.DashboardHandler)
-	app.Post("/tasks/occurrence/:id/action", auth.JWTMiddleware(), task.UpdateOccStatusHandler)
-	app.Post("/tasks/templates/:id/update", auth.JWTMiddleware(), task.UpdateTaskTemplateHandler)
-	app.Patch("/task-template/:id/status", auth.JWTMiddleware(), task.SetTaskTemplateStatusHandler)
-	app.Get("/task-templates", auth.JWTMiddleware(), task.GetTaskTemplatesHandler)
-	app.Get("/taskTemplates/:id", auth.JWTMiddleware(), task.GetTemplateDetailHandler)
-	app.Get("/today", auth.JWTMiddleware(), task.GetTodayOccs)
+	app.Post("/auth/register", auth.RegisterHandler)
+	app.Post("/auth/login", auth.LoginHandler)
 
-	app.Get("/test/me", auth.JWTMiddleware(), func(c fiber.Ctx) error {
-		return c.JSON(fiber.Map{
-			"userID": c.Locals("userId"),
-			"email":  c.Locals("email"),
-		})
-	})
+	protected := app.Group("", auth.JWTMiddleware)
+
+	protected.Get("/auth/me", auth.MeHandler)
+
+	protected.Post("/tasks/templates", task.CreateTaskTemplateHandler)
+	protected.Get("/tasks/templates", task.GetTaskTemplatesHandler)
+	protected.Get("/tasks/templates/:id", task.GetTemplateDetailHandler)
+	protected.Patch("/tasks/templates/:id", task.UpdateTaskTemplateHandler)
+	protected.Patch("/tasks/templates/:id/status", task.SetTaskTemplateStatusHandler)
+
+	protected.Get("/dashboard", task.DashboardHandler)
+	protected.Get("/tasks/today", task.GetTodayOccs)
+
+	protected.Patch("/tasks/occurrences/:id/status", task.UpdateOccStatusHandler)
 
 	port := os.Getenv("APP_PORT")
 	if port == "" {
@@ -72,14 +71,4 @@ func main() {
 		os.Exit(1)
 	}
 
-}
-
-func hPanic(c fiber.Ctx) error {
-	panic("panic")
-}
-
-func helloWorld(c fiber.Ctx) error {
-	return c.JSON(fiber.Map{
-		"message": "Hello World!",
-	})
 }

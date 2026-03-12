@@ -940,9 +940,9 @@ func GetTodayOccs(c fiber.Ctx) error {
 	}
 
 	return c.Status(200).JSON(fiber.Map{
-		"today":   todayOccs,
-		"overDue": overdue,
-		"now":     today,
+		"today":       todayOccs,
+		"overdue":     overdue,
+		"currentDate": today,
 
 		"counts": fiber.Map{
 			"overdue": len(overdue),

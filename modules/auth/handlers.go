@@ -123,6 +123,12 @@ func LoginHandler(c fiber.Ctx) error {
 
 	tx := database.FetchUserByEmail(data.Email, user)
 
+	if !user.IsActive {
+		return c.Status(401).JSON(fiber.Map{
+			"message": "User account is deactivated",
+		})
+	}
+
 	if tx.Error != nil {
 
 		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
@@ -162,5 +168,32 @@ func LoginHandler(c fiber.Ctx) error {
 	return c.Status(200).JSON(fiber.Map{
 		"message": "Successfully logged in",
 		"token":   jwtToken,
+	})
+}
+
+func MeHandler(c fiber.Ctx) error {
+
+	uid := c.Locals("userId").(uint)
+	user := new(User)
+	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	me := MeDTO{
+		UserID:      user.UserID,
+		Name:        user.Name,
+		Surname:     user.Surname,
+		Email:       user.Email,
+		IsActive:    user.IsActive,
+		LastLoginAt: user.LastLoginAt,
+		CreatedAt:   user.CreatedAt,
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"message": "User successfully fetched",
+		"user":    me,
 	})
 }

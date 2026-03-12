@@ -26,3 +26,13 @@ type LoginDTO struct {
 	Email    string `json:"email" validate:"required,email"`
 	Password string `json:"password" validate:"required,min=8,max=64"`
 }
+
+type MeDTO struct {
+	UserID      uint      `json:"userId"`
+	Name        string    `json:"name"`
+	Surname     string    `json:"surname"`
+	Email       string    `json:"email"`
+	IsActive    bool      `json:"isActive"`
+	LastLoginAt time.Time `json:"lastLoginAt"`
+	CreatedAt   time.Time `json:"createdAt"`
+}

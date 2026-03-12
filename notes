@@ -1,9 +1,19 @@
-CreateTaskTemplateHandler repeatable veya on shot task oluşturur
-DashboardHandler overdue, hafta sonuna kadar ve ay sonuna kadar duedate'i bulunan occ'leri döner
-UpdateOccStatusHandler  occ için complete undo skip reschedule işlemi yapar
-UpdateTaskTemplateHandler taskTemplate için tittle, desc alanlarını; repeatablelar için RepeatUnit, RepeatInterval, StartDate alanlarını; one shot için dueDate alanını günceller
-SetTaskTemplateStatusHandler task template için isactive değerini günceller
-GetTaskTemplatesHandler kullanıcıya ait taskTemplateleri aktif inaktif ayrımı ile döner
-LoginHandler kullanıcı girişi
-RegisterHandler kullanıcı oluşturma
+app.Get("/health", database.HealthHandler)
 
+app.Post("/auth/register", auth.RegisterHandler)
+app.Post("/auth/login", auth.LoginHandler)
+
+protected := app.Group("", auth.JWTMiddleware)
+
+protected.Get("/auth/me", auth.MeHandler)
+
+protected.Post("/tasks/templates", task.CreateTaskTemplateHandler)
+protected.Get("/tasks/templates", task.GetTaskTemplatesHandler)
+protected.Get("/tasks/templates/:id", task.GetTemplateDetailHandler)
+protected.Patch("/tasks/templates/:id", task.UpdateTaskTemplateHandler)
+protected.Patch("/tasks/templates/:id/status", task.SetTaskTemplateStatusHandler)
+
+protected.Get("/dashboard", task.DashboardHandler)
+protected.Get("/tasks/today", task.GetTodayOccs)
+
+protected.Patch("/tasks/occurrences/:id/status", task.UpdateOccStatusHandler)
