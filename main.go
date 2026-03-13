@@ -43,7 +43,7 @@ func main() {
 	app.Post("/auth/register", auth.RegisterHandler)
 	app.Post("/auth/login", auth.LoginHandler)
 
-	protected := app.Group("", auth.JWTMiddleware)
+	protected := app.Group("", auth.JWTMiddleware())
 
 	protected.Get("/auth/me", auth.MeHandler)
 
