@@ -7,6 +7,29 @@ The project is designed as an **MVP backend** for a productivity / task planner 
 
 ---
 
+# Screenshots
+
+<div align="center">
+  <h3>Main Dashboard</h3>
+  <img src="assets/screenshots/dashboard.png" width="800px" alt="7Planner Dashboard">
+  
+  <br>
+
+  <table width="100%">
+    <tr>
+      <td width="33%" align="center"><b>Login</b><br><img src="assets/screenshots/login.png" width="300px"></td>
+      <td width="33%" align="center"><b>Register</b><br><img src="assets/screenshots/register.png" width="300px"></td>
+      <td width="33%" align="center"><b>Today View</b><br><img src="assets/screenshots/today.png" width="300px"></td>
+    </tr>
+    <tr>
+      <td width="33%" align="center"><b>Templates</b><br><img src="assets/screenshots/templates.png" width="300px"></td>
+      <td width="33%" align="center"><b>Create Task</b><br><img src="assets/screenshots/create-template.png" width="300px"></td>
+      <td width="33%" align="center"><b>Recurring Task</b><br><img src="assets/screenshots/create-template-recurring.png" width="300px"></td>
+    </tr>
+  </table>
+</div>
+---
+
 # Features
 
 ### Authentication

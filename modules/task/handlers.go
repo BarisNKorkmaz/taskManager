@@ -927,7 +927,7 @@ func GetTodayOccs(c fiber.Ctx) error {
 				DueDate:     occ.DueDate,
 				IsCompleted: occ.IsCompleted,
 			})
-		} else if occ.DueDate.Equal(*today) {
+		} else if !occ.DueDate.After(*today) {
 			todayOccs = append(todayOccs, DashboardOccurrenceDTO{
 				ID:          occ.ID,
 				TaskID:      occ.TaskID,

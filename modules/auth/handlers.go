@@ -123,7 +123,7 @@ func LoginHandler(c fiber.Ctx) error {
 
 	tx := database.FetchUserByEmail(data.Email, user)
 
-	if !user.IsActive {
+	if !user.IsActive && user.Email != "" {
 		return c.Status(401).JSON(fiber.Map{
 			"message": "User account is deactivated",
 		})

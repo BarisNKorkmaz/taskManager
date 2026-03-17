@@ -40,10 +40,10 @@ func main() {
 	app.Use(logger.New())
 	app.Get("/health", database.HealthHandler)
 
-	app.Post("/auth/register", auth.RegisterHandler)
-	app.Post("/auth/login", auth.LoginHandler)
+	app.Post("/register", auth.RegisterHandler)
+	app.Post("/login", auth.LoginHandler)
 
-	protected := app.Group("", auth.JWTMiddleware)
+	protected := app.Group("/u", auth.JWTMiddleware())
 
 	protected.Get("/auth/me", auth.MeHandler)
 
