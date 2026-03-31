@@ -46,7 +46,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 
 	if !ok {
 		return c.Status(401).JSON(fiber.Map{
-			"Message": "Unauthorized or expired token",
+			"message": "Unauthorized or expired token",
 		})
 	}
 	user := &auth.User{}
@@ -81,6 +81,15 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 
 		if data.StartDate == nil {
 			data.StartDate = getLocalDate(*user)
+		} else {
+			startDate, err := NormalizeToUserDate(*data.StartDate, user.Timezone)
+			if err != nil {
+				return c.Status(400).JSON(fiber.Map{
+					"message": "Bad request",
+					"error":   "invalid user timezone",
+				})
+			}
+			data.StartDate = startDate
 		}
 
 		task.IsRepeatEnabled = true
@@ -94,7 +103,14 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 				"message": "if isRepeatEnabled is false, dueDate value can't be null",
 			})
 		}
-		task.DueDate = data.DueDate
+		dueDate, err := NormalizeToUserDate(*data.DueDate, user.Timezone)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"message": "Bad request",
+				"error":   "invalid user timezone",
+			})
+		}
+		task.DueDate = dueDate
 	}
 
 	atomicDB := database.DB.Begin()
@@ -114,6 +130,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 	}
 
 	if !task.IsRepeatEnabled {
+
 		occ := TaskOccurrence{
 			TaskID:      task.ID,
 			UserID:      userID,
@@ -302,14 +319,31 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 	}
 	now := getLocalDate(*user)
 	action := strings.ToLower(data.Action)
+
 	if action == "reschedule" {
-		if data.NewDueDate == nil || !data.NewDueDate.After(*now) {
+		if data.NewDueDate == nil {
 			return c.Status(400).JSON(fiber.Map{
 				"message": "Bad request",
-				"error":   "newDueDate must be a future date for reschedule",
+				"error":   "newDueDate can't be null",
 			})
+		} else {
+			if dueDate, err := NormalizeToUserDate(*data.NewDueDate, user.Timezone); err != nil {
+				return c.Status(400).JSON(fiber.Map{
+					"message": "Bad request",
+					"error":   "invalid user timezone",
+				})
+			} else {
+				data.NewDueDate = dueDate
+				if data.NewDueDate.Before(*now) {
+					return c.Status(400).JSON(fiber.Map{
+						"message": "Bad request",
+						"error":   "newDueDate cannot be in the past",
+					})
+				}
+			}
 		}
 	}
+
 	occ := new(TaskOccurrence)
 	if tx := database.FetchOccurenceByOccId(&TaskOccurrence{}, occId64, uid, occ); tx.Error != nil {
 		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
@@ -329,13 +363,20 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 	switch action {
 	case "complete":
 
+		if occ.IsCompleted {
+			return c.Status(409).JSON(fiber.Map{
+				"message": "Conflict",
+				"error":   "occurrence is already completed or skipped",
+			})
+		}
+
 		occ.IsCompleted = true
 		occ.CompletedAt = now
 
 		resMessage = "task completed"
 
 	case "undo":
-		if occ.IsCompleted {
+		if !occ.IsCompleted {
 			return c.Status(409).JSON(fiber.Map{
 				"message": "Conflict",
 				"error":   "occurrence is already pending",
@@ -371,6 +412,11 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 			return c.Status(409).JSON(fiber.Map{
 				"message": "Conflict",
 				"error":   "another occurrence already exists for this task on the selected date",
+			})
+		} else if tx.RowsAffected == 0 {
+			return c.Status(404).JSON(fiber.Map{
+				"message": "Not found",
+				"error":   "occurrence could not be updated",
 			})
 		}
 		return c.Status(500).JSON(fiber.Map{
@@ -918,7 +964,9 @@ func GetTodayOccs(c fiber.Ctx) error {
 
 	for _, occ := range uncompletedOcc {
 
-		if occ.DueDate.Before(*today) {
+		dueNorm, _ := NormalizeToUserDate(occ.DueDate, user.Timezone)
+
+		if dueNorm.Before(*today) {
 			overdue = append(overdue, DashboardOccurrenceDTO{
 				ID:          occ.ID,
 				TaskID:      occ.TaskID,
@@ -927,7 +975,7 @@ func GetTodayOccs(c fiber.Ctx) error {
 				DueDate:     occ.DueDate,
 				IsCompleted: occ.IsCompleted,
 			})
-		} else if !occ.DueDate.After(*today) {
+		} else if !dueNorm.After(*today) || occ.DueDate.Equal(*today) {
 			todayOccs = append(todayOccs, DashboardOccurrenceDTO{
 				ID:          occ.ID,
 				TaskID:      occ.TaskID,
@@ -936,6 +984,13 @@ func GetTodayOccs(c fiber.Ctx) error {
 				DueDate:     occ.DueDate,
 				IsCompleted: occ.IsCompleted,
 			})
+		} else {
+			fmt.Println("----------------------------DEBUG TIME-------------------------------------------")
+			fmt.Println(occ.TaskID)
+			fmt.Println(occ.DueDate)
+			fmt.Println(dueNorm)
+			fmt.Println(*today)
+			fmt.Println(" ")
 		}
 	}
 
@@ -950,4 +1005,23 @@ func GetTodayOccs(c fiber.Ctx) error {
 		},
 	})
 
+}
+
+func NormalizeToUserDate(t time.Time, userTimezone string) (*time.Time, error) {
+	loc, err := time.LoadLocation(userTimezone)
+	if err != nil {
+		return nil, err
+	}
+
+	local := t.In(loc)
+
+	normalized := time.Date(
+		local.Year(),
+		local.Month(),
+		local.Day(),
+		0, 0, 0, 0,
+		loc,
+	)
+
+	return &normalized, nil
 }
