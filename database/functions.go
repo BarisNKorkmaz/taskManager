@@ -61,3 +61,11 @@ func DeleteChangedOccs(database *gorm.DB, model any, taskId any, now time.Time, 
 func FetchTaskTemplates(model any, userId uint, dest any) *gorm.DB {
 	return DB.Model(model).Where("user_id = ?", userId).Order("created_at DESC").Find(dest)
 }
+
+func DeleteSessionByUserId(database *gorm.DB, userId any, model any) *gorm.DB {
+	return database.Model(model).Where("user_id = ?", userId).Delete(model)
+}
+
+func FetchSessionByUserId(userId any, model any, dest any) *gorm.DB {
+	return DB.Model(model).Where("user_id = ?", userId).First(dest)
+}

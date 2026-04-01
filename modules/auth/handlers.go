@@ -78,19 +78,21 @@ func RegisterHandler(c fiber.Ctx) error {
 		})
 	}
 
-	jwtToken, jwtErr := GenerateJwtToken(user.UserID, user.Email)
+	tokens := GenerateRefreshToken(user.UserID, user.Email)
 
-	if jwtErr != nil {
-		middleware.Log.Error("failed on JWT token generating operation:", "err", jwtErr)
+	if tokens.err != nil {
 		return c.Status(201).JSON(fiber.Map{
 			"message":       "User successfully created. Please login.",
 			"requiresLogin": true,
 		})
 	}
 
+	cookie := SetCookieHelper("refresh_token", tokens.refreshToken, time.Now().Add(168*time.Hour))
+	c.Cookie(&cookie)
+
 	return c.Status(201).JSON(fiber.Map{
-		"message": "User successfully created",
-		"token":   jwtToken,
+		"message":     "User successfully created",
+		"accessToken": tokens.accessToken,
 	})
 
 }
@@ -121,15 +123,7 @@ func LoginHandler(c fiber.Ctx) error {
 
 	user := new(User)
 
-	tx := database.FetchUserByEmail(data.Email, user)
-
-	if !user.IsActive && user.Email != "" {
-		return c.Status(401).JSON(fiber.Map{
-			"message": "User account is deactivated",
-		})
-	}
-
-	if tx.Error != nil {
+	if tx := database.FetchUserByEmail(data.Email, user); tx.Error != nil {
 
 		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 			return c.Status(401).JSON(fiber.Map{
@@ -144,21 +138,29 @@ func LoginHandler(c fiber.Ctx) error {
 		})
 	}
 
+	if !user.IsActive && user.Email != "" {
+		return c.Status(401).JSON(fiber.Map{
+			"message": "User account is deactivated",
+		})
+	}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(data.Password)); err != nil {
 		return c.Status(401).JSON(fiber.Map{
 			"message": "Wrong password or email",
 		})
 	}
 
-	jwtToken, jwtErr := GenerateJwtToken(user.UserID, user.Email)
+	tokens := GenerateRefreshToken(user.UserID, user.Email)
 
-	if jwtErr != nil {
-		middleware.Log.Error("failed on JWT token generating operation:", "err", jwtErr)
+	if tokens.err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
-			"error":   jwtErr.Error(),
+			"error":   tokens.err.Error(),
 		})
 	}
+
+	cookie := SetCookieHelper("refresh_token", tokens.refreshToken, time.Now().Add(168*time.Hour))
+	c.Cookie(&cookie)
 
 	dbErr := database.UpdateLastLogin(&User{}, "user_id = ?", user.UserID)
 	if dbErr.Error != nil {
@@ -166,8 +168,8 @@ func LoginHandler(c fiber.Ctx) error {
 	}
 
 	return c.Status(200).JSON(fiber.Map{
-		"message": "Successfully logged in",
-		"token":   jwtToken,
+		"message":     "Successfully logged in",
+		"accessToken": tokens.accessToken,
 	})
 }
 
@@ -196,4 +198,74 @@ func MeHandler(c fiber.Ctx) error {
 		"message": "User successfully fetched",
 		"user":    me,
 	})
+}
+
+func RefreshHandler(c fiber.Ctx) error {
+	refreshToken := c.Cookies("refresh_token")
+
+	if refreshToken == "" {
+		return c.Status(401).JSON(fiber.Map{
+			"message": "Unauthorized",
+			"error":   "Missing refresh token",
+		})
+	}
+
+	res := ValidateRefreshToken(refreshToken)
+
+	if res.err != nil {
+		c.ClearCookie("refresh_token")
+		return c.Status(401).JSON(fiber.Map{
+			"message": "Unauthorized",
+			"error":   res.err,
+		})
+	}
+
+	if res.refreshToken != "" {
+		cookie := SetCookieHelper("refresh_token", res.refreshToken, time.Now().Add(168*time.Hour))
+		c.Cookie(&cookie)
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"message":     "Token refreshed successfully",
+		"accessToken": res.accessToken,
+	})
+
+}
+
+func LogoutHandler(c fiber.Ctx) error {
+	refreshToken := c.Cookies("refresh_token")
+	if refreshToken == "" {
+		return c.Status(401).JSON(fiber.Map{
+			"message": "Unauthorized",
+			"error":   "Missing refresh token",
+		})
+	}
+
+	uid := c.Locals("userId").(uint)
+
+	if tx := database.DeleteSessionByUserId(database.DB, uid, &Session{}); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error,
+		})
+	}
+
+	cookie := SetCookieHelper("refresh_token", "", time.Now().Add(-1*time.Hour))
+	c.Cookie(&cookie)
+
+	return c.Status(200).JSON(fiber.Map{
+		"message": "Successfully logged out",
+	})
+}
+
+func SetCookieHelper(name string, value string, expireTime time.Time) fiber.Cookie {
+	return fiber.Cookie{
+		Name:     name,
+		Value:    value,
+		HTTPOnly: true,
+		Secure:   false,
+		SameSite: "Lax",
+		Path:     "/",
+		Expires:  expireTime,
+	}
 }

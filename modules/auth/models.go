@@ -36,3 +36,11 @@ type MeDTO struct {
 	LastLoginAt time.Time `json:"lastLoginAt"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
+
+type Session struct {
+	ID        string    `gorm:"primaryKey"`
+	UserID    uint      `gorm:"not null;index"`
+	TokenHash string    `gorm:"not null;uniqueIndex"`
+	ExpiresAt time.Time `gorm:"not null;index"`
+	CreatedAt time.Time `gorm:"not null"`
+}

@@ -29,23 +29,34 @@ func main() {
 		middleware.Log.Info("Database connected.")
 	}
 
-	if err := database.DB.AutoMigrate(&auth.User{}, &task.TaskTemplate{}, &task.TaskOccurrence{}); err != nil {
+	if err := database.DB.AutoMigrate(&auth.User{}, &task.TaskTemplate{}, &task.TaskOccurrence{}, &auth.Session{}); err != nil {
 		middleware.Log.Error("Migration error:", "err", err.Error())
 	} else {
 		middleware.Log.Info("Database migrated")
 	}
 
 	app := fiber.New()
+
+	/* app.Use(cors.New(cors.Config{
+		AllowOrigins:     "http://localhost:8080", // frontend adresi
+		AllowMethods:     "GET,POST,PUT,PATCH,DELETE",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+		AllowCredentials: true,
+	})) */
+
 	app.Use(recoverer.New())
 	app.Use(logger.New())
 	app.Get("/health", database.HealthHandler)
 
-	app.Post("/register", auth.RegisterHandler)
-	app.Post("/login", auth.LoginHandler)
+	authGroup := app.Group("/auth")
+	authGroup.Post("/register", auth.RegisterHandler)
+	authGroup.Post("/login", auth.LoginHandler)
+	authGroup.Post("/refresh", auth.RefreshHandler)
 
-	protected := app.Group("/u", auth.JWTMiddleware())
+	protected := app.Group("/u", auth.AccessTokenMiddleware())
 
 	protected.Get("/auth/me", auth.MeHandler)
+	protected.Post("/auth/logout", auth.LogoutHandler)
 
 	protected.Post("/tasks/templates", task.CreateTaskTemplateHandler)
 	protected.Get("/tasks/templates", task.GetTaskTemplatesHandler)
