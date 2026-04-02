@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,6 +19,7 @@ import (
 
 func RegisterHandler(c fiber.Ctx) error {
 	data := new(RegisterDTO)
+	now := time.Now()
 	if err := c.Bind().Body(data); err != nil {
 		return c.Status(400).JSON(fiber.Map{
 			"message": "Bad request",
@@ -57,12 +60,13 @@ func RegisterHandler(c fiber.Ctx) error {
 	}
 
 	user := User{
-		Name:         data.Name,
-		Surname:      data.Surname,
-		PasswordHash: string(hashedPass),
-		Email:        data.Email,
-		LastLoginAt:  time.Now(),
-		Timezone:     loc.String(),
+		Name:          data.Name,
+		Surname:       data.Surname,
+		PasswordHash:  string(hashedPass),
+		Email:         data.Email,
+		LastLoginAt:   now,
+		Timezone:      loc.String(),
+		PassChangedAt: now,
 	}
 
 	tx := database.Create(database.DB, &user, &User{})
@@ -268,4 +272,212 @@ func SetCookieHelper(name string, value string, expireTime time.Time) fiber.Cook
 		Path:     "/",
 		Expires:  expireTime,
 	}
+}
+
+func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
+	data := new(ForgotPassDTO)
+	user := new(User)
+	now := time.Now()
+
+	if err := c.Bind().Body(data); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   err.Error(),
+		})
+	}
+
+	if err := utils.Validate.Struct(data); err != nil {
+		var messages []string
+		valErrs := err.(validator.ValidationErrors)
+
+		for _, valErr := range valErrs {
+			messages = append(messages, fmt.Sprintf("Field: %s, Failed on: %s On your value: %v", valErr.Field(), valErr.Tag(), valErr.Value()))
+		}
+
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   messages,
+		})
+	}
+
+	if tx := database.FetchUserByEmail(data.Email, user); tx.Error != nil {
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			return c.Status(200).JSON(fiber.Map{
+				"message": "If the email exists, a password reset link has been sent.",
+			})
+		}
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error,
+		})
+	}
+
+	token, hashedToken, generateErr := utils.GeneratePassRefreshToken()
+
+	if generateErr != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   generateErr.Error(),
+		})
+	}
+
+	resetToken := PasswordResetToken{
+		UserID:    user.UserID,
+		CreatedAt: now,
+		ExpiresAt: now.Add(15 * time.Minute),
+		TokenHash: hashedToken,
+	}
+
+	created := false
+	for i := 0; i < 3; i++ {
+		if tx := database.Create(database.DB, &resetToken, &PasswordResetToken{}); tx.Error != nil {
+			if errors.Is(tx.Error, gorm.ErrDuplicatedKey) || strings.Contains(tx.Error.Error(), "SQLSTATE 23505") {
+
+				if token, hashedToken, generateErr = utils.GeneratePassRefreshToken(); generateErr != nil {
+					return c.Status(500).JSON(fiber.Map{
+						"message": "Server error",
+						"error":   generateErr.Error(),
+					})
+				}
+				resetToken.TokenHash = hashedToken
+				continue
+
+			}
+
+			return c.Status(500).JSON(fiber.Map{
+				"message": "Server error",
+				"error":   tx.Error.Error(),
+			})
+		}
+		created = true
+		break
+	}
+
+	if !created {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   "password reset token could not be created",
+		})
+	}
+
+	//url := fmt.Sprintf("%s/reset-password?token=%s", "frontenddomain.com", token) //TODO frontEnd domaini global bir değişkene ata
+
+	//TODO send mail fonksiyonu buraya
+
+	return c.Status(200).JSON(fiber.Map{
+		"message": "If the email exists, a password reset link has been sent.",
+	})
+}
+
+func ResetPasswordHandler(c fiber.Ctx) error { //
+	data := new(ResetPassDTO)
+	resetToken := new(PasswordResetToken)
+	user := new(User)
+	now := time.Now()
+
+	if err := c.Bind().Body(data); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   err.Error(),
+		})
+	}
+
+	if err := utils.Validate.Struct(data); err != nil {
+		var messages []string
+		valErrs := err.(validator.ValidationErrors)
+
+		for _, valErr := range valErrs {
+			messages = append(messages, fmt.Sprintf("Field: %s, Failed on: %s, On your value: %v", valErr.Field(), valErr.Tag(), valErr.Value()))
+		}
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   messages,
+		})
+	}
+
+	h := sha256.New()
+	h.Write([]byte(data.Token))
+	hashedToken := hex.EncodeToString(h.Sum(nil))
+
+	if tx := database.FetchPassResetTokenByToken(hashedToken, &PasswordResetToken{}, resetToken); tx.Error != nil {
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			return c.Status(400).JSON(fiber.Map{
+				"message": "Invalid or expired token",
+			})
+		}
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	if resetToken.ExpiresAt.Before(now) {
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Invalid or expired token",
+		})
+	}
+
+	if tx := database.FetchUserByUID(resetToken.UserID, user); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	updates := make(map[string]any)
+
+	if hashedNewPass, err := bcrypt.GenerateFromPassword([]byte(data.NewPassword), bcrypt.DefaultCost); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   err.Error(),
+		})
+	} else {
+		updates["password_hash"] = string(hashedNewPass)
+		updates["pass_changed_at"] = now
+	}
+
+	atomicDb := database.DB.Begin()
+	if atomicDb.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   atomicDb.Error.Error(),
+		})
+	}
+
+	if tx := database.DeletePassResetToken(atomicDb, resetToken.ID, &PasswordResetToken{}); tx.Error != nil {
+		atomicDb.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	if tx := database.UpdateUserPass(atomicDb, &User{}, user.UserID, updates); tx.Error != nil {
+		atomicDb.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	if tx := database.DeleteSessionByUserId(atomicDb, user.UserID, &Session{}); tx.Error != nil {
+		atomicDb.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	if tx := atomicDb.Commit(); tx.Error != nil {
+		atomicDb.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"message": "Password successfully changed",
+	})
+
 }

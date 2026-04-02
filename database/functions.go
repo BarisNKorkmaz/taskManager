@@ -69,3 +69,15 @@ func DeleteSessionByUserId(database *gorm.DB, userId any, model any) *gorm.DB {
 func FetchSessionByUserId(userId any, model any, dest any) *gorm.DB {
 	return DB.Model(model).Where("user_id = ?", userId).First(dest)
 }
+
+func FetchPassResetTokenByToken(hashedToken string, model any, dest any) *gorm.DB {
+	return DB.Model(model).Where("token_hash = ?", hashedToken).First(dest)
+}
+
+func UpdateUserPass(database *gorm.DB, model any, userId any, value map[string]any) *gorm.DB {
+	return database.Model(model).Where("user_id = ?", userId).Select("password_hash", "pass_changed_at").Updates(value)
+}
+
+func DeletePassResetToken(database *gorm.DB, tokenId any, model any) *gorm.DB {
+	return database.Model(model).Where("id = ?", tokenId).Delete(model)
+}
