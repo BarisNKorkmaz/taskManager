@@ -81,3 +81,7 @@ func UpdateUserPass(database *gorm.DB, model any, userId any, value map[string]a
 func DeletePassResetToken(database *gorm.DB, tokenId any, model any) *gorm.DB {
 	return database.Model(model).Where("id = ?", tokenId).Delete(model)
 }
+
+func DeletePassResetTokenByUserId(database *gorm.DB, userId any, model any) *gorm.DB {
+	return database.Model(model).Where("user_id = ?", userId).Delete(model)
+}

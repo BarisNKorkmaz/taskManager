@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -308,11 +309,11 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 		}
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
-			"error":   tx.Error,
+			"error":   tx.Error.Error(),
 		})
 	}
 
-	token, hashedToken, generateErr := utils.GeneratePassRefreshToken()
+	token, hashedToken, generateErr := utils.GeneratePassResetToken()
 
 	if generateErr != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -328,48 +329,78 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 		TokenHash: hashedToken,
 	}
 
-	created := false
-	for i := 0; i < 3; i++ {
-		if tx := database.Create(database.DB, &resetToken, &PasswordResetToken{}); tx.Error != nil {
-			if errors.Is(tx.Error, gorm.ErrDuplicatedKey) || strings.Contains(tx.Error.Error(), "SQLSTATE 23505") {
-
-				if token, hashedToken, generateErr = utils.GeneratePassRefreshToken(); generateErr != nil {
-					return c.Status(500).JSON(fiber.Map{
-						"message": "Server error",
-						"error":   generateErr.Error(),
-					})
-				}
-				resetToken.TokenHash = hashedToken
-				continue
-
-			}
-
-			return c.Status(500).JSON(fiber.Map{
-				"message": "Server error",
-				"error":   tx.Error.Error(),
-			})
-		}
-		created = true
-		break
-	}
-
-	if !created {
+	atomicDb := database.DB.Begin()
+	if atomicDb.Error != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
-			"error":   "password reset token could not be created",
+			"error":   atomicDb.Error.Error(),
 		})
 	}
 
-	//url := fmt.Sprintf("%s/reset-password?token=%s", "frontenddomain.com", token) //TODO frontEnd domaini global bir değişkene ata
+	if tx := database.DeletePassResetTokenByUserId(atomicDb, user.UserID, &PasswordResetToken{}); tx.Error != nil {
+		atomicDb.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
 
-	//TODO send mail fonksiyonu buraya
+	if tx := database.Create(atomicDb, &resetToken, &PasswordResetToken{}); tx.Error != nil {
+		atomicDb.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	if tx := atomicDb.Commit(); tx.Error != nil {
+		atomicDb.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	mailService, err := utils.LoadMailConfig()
+
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   err.Error(),
+		})
+	}
+	frontendDomain := os.Getenv("FRONTEND_URL")
+	if frontendDomain == "" {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   "FRONTEND_URL env not set",
+		})
+	}
+	resetUrl := fmt.Sprintf("%s/reset-password?token=%s", frontendDomain, token)
+	uid := user.UserID
+	userMail := user.Email
+	go func() {
+		if err := mailService.SendForgotPasswordEmail(userMail, resetUrl); err != nil {
+
+			middleware.Log.Error("Failed to send reset email",
+				"email", userMail,
+				"error", err.Error(),
+			)
+
+			if tx := database.DeletePassResetTokenByUserId(database.DB, uid, &PasswordResetToken{}); tx.Error != nil {
+				middleware.Log.Error("Failed to delete passResetToken",
+					"tokenid", resetToken.ID,
+					"err", tx.Error.Error())
+			}
+		}
+	}()
 
 	return c.Status(200).JSON(fiber.Map{
 		"message": "If the email exists, a password reset link has been sent.",
 	})
 }
 
-func ResetPasswordHandler(c fiber.Ctx) error { //
+func ResetPasswordHandler(c fiber.Ctx) error {
 	data := new(ResetPassDTO)
 	resetToken := new(PasswordResetToken)
 	user := new(User)
@@ -444,14 +475,6 @@ func ResetPasswordHandler(c fiber.Ctx) error { //
 		})
 	}
 
-	if tx := database.DeletePassResetToken(atomicDb, resetToken.ID, &PasswordResetToken{}); tx.Error != nil {
-		atomicDb.Rollback()
-		return c.Status(500).JSON(fiber.Map{
-			"message": "Server error",
-			"error":   tx.Error.Error(),
-		})
-	}
-
 	if tx := database.UpdateUserPass(atomicDb, &User{}, user.UserID, updates); tx.Error != nil {
 		atomicDb.Rollback()
 		return c.Status(500).JSON(fiber.Map{
@@ -461,6 +484,14 @@ func ResetPasswordHandler(c fiber.Ctx) error { //
 	}
 
 	if tx := database.DeleteSessionByUserId(atomicDb, user.UserID, &Session{}); tx.Error != nil {
+		atomicDb.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	if tx := database.DeletePassResetToken(atomicDb, resetToken.ID, &PasswordResetToken{}); tx.Error != nil {
 		atomicDb.Rollback()
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",

@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 )
 
-func GeneratePassRefreshToken() (token string, hashedToken string, err error) {
+func GeneratePassResetToken() (token string, hashedToken string, err error) {
 
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
