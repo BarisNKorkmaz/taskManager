@@ -9,6 +9,7 @@ import (
 
 	"github.com/BarisNKorkmaz/taskManager/database"
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/limiter"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -117,4 +118,22 @@ func ValidateRefreshToken(refreshToken string) (res tokens) {
 
 	return
 
+}
+
+func LoginIPRateLimiter() fiber.Handler {
+
+	return limiter.New(limiter.Config{
+		Max:        5,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP()
+		},
+		LimitReached: func(c fiber.Ctx) error {
+			return c.Status(429).JSON(fiber.Map{
+				"message": "Too Many Requests",
+				"error":   "Too many login attempts. Please wait a while before trying again.",
+			})
+		},
+	},
+	)
 }

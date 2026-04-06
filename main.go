@@ -37,6 +37,9 @@ func main() {
 
 	app := fiber.New()
 
+	/* app := fiber.New(fiber.Config{
+		TrustProxy: true,
+	}) */
 	/* app.Use(cors.New(cors.Config{
 		AllowOrigins:     "http://localhost:8080", // frontend adresi
 		AllowMethods:     "GET,POST,PUT,PATCH,DELETE",
@@ -50,7 +53,7 @@ func main() {
 
 	authGroup := app.Group("/auth")
 	authGroup.Post("/register", auth.RegisterHandler)
-	authGroup.Post("/login", auth.LoginHandler)
+	authGroup.Post("/login", auth.LoginIPRateLimiter(), auth.LoginHandler)
 	authGroup.Post("/refresh", auth.RefreshHandler)
 
 	protected := app.Group("/u", auth.AccessTokenMiddleware())
