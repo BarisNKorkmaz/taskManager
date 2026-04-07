@@ -137,3 +137,32 @@ func LoginIPRateLimiter() fiber.Handler {
 	},
 	)
 }
+
+func EmailRateLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:                    10,
+		Expiration:             15 * time.Minute,
+		SkipSuccessfulRequests: true,
+		KeyGenerator: func(c fiber.Ctx) string {
+			var data struct {
+				Email string `json:"email"`
+			}
+
+			_ = c.Bind().Body(&data)
+
+			if data.Email == "" || data.Email == " " {
+				c.Next()
+			}
+
+			data.Email = strings.TrimSpace(strings.ToLower(data.Email))
+
+			return data.Email
+		},
+		LimitReached: func(c fiber.Ctx) error {
+			return c.Status(429).JSON(fiber.Map{
+				"message": "Too Many Requests",
+				"error":   "Too many login attempts. Please wait 15 minutes before trying again.",
+			})
+		},
+	})
+}

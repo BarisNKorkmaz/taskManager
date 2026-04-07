@@ -53,7 +53,7 @@ func main() {
 
 	authGroup := app.Group("/auth")
 	authGroup.Post("/register", auth.RegisterHandler)
-	authGroup.Post("/login", auth.LoginIPRateLimiter(), auth.LoginHandler)
+	authGroup.Post("/login", auth.EmailRateLimiter(), auth.LoginIPRateLimiter(), auth.LoginHandler)
 	authGroup.Post("/refresh", auth.RefreshHandler)
 
 	protected := app.Group("/u", auth.AccessTokenMiddleware())
