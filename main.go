@@ -6,6 +6,7 @@ import (
 	"github.com/BarisNKorkmaz/taskManager/database"
 	"github.com/BarisNKorkmaz/taskManager/middleware"
 	"github.com/BarisNKorkmaz/taskManager/modules/auth"
+	"github.com/BarisNKorkmaz/taskManager/modules/notification"
 	"github.com/BarisNKorkmaz/taskManager/modules/task"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
@@ -29,7 +30,7 @@ func main() {
 		middleware.Log.Info("Database connected.")
 	}
 
-	if err := database.DB.AutoMigrate(&auth.User{}, &task.TaskTemplate{}, &task.TaskOccurrence{}, &auth.Session{}); err != nil {
+	if err := database.DB.AutoMigrate(&auth.User{}, &task.TaskTemplate{}, &task.TaskOccurrence{}, &auth.Session{}, &notification.DeviceToken{}); err != nil {
 		middleware.Log.Error("Migration error:", "err", err.Error())
 	} else {
 		middleware.Log.Info("Database migrated")
@@ -60,6 +61,9 @@ func main() {
 
 	protected.Get("/auth/me", auth.MeHandler)
 	protected.Post("/auth/logout", auth.LogoutHandler)
+
+	protected.Post("/devices/push-token", notification.RegisterPushTokenHandler)
+	protected.Delete("/devices/push-token", notification.DeletePushTokenHandler)
 
 	protected.Post("/tasks/templates", task.CreateTaskTemplateHandler)
 	protected.Get("/tasks/templates", task.GetTaskTemplatesHandler)

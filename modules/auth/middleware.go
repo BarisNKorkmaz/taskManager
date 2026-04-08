@@ -66,7 +66,7 @@ func AccessTokenMiddleware() fiber.Handler {
 	}
 }
 
-func ValidateRefreshToken(refreshToken string) (res tokens) {
+func ValidateRefreshToken(refreshToken string, ipAdress string) (res tokens) {
 
 	now := time.Now()
 	claims, err := JwtParseAndValidate(refreshToken)
@@ -102,7 +102,7 @@ func ValidateRefreshToken(refreshToken string) (res tokens) {
 	}
 
 	if claims.ExpiresAt.Before(now.Add(84 * time.Hour)) {
-		res = GenerateRefreshToken(claims.UserID, claims.Email)
+		res = GenerateRefreshToken(claims.UserID, claims.Email, ipAdress)
 		return
 	}
 

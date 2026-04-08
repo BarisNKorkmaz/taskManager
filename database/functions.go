@@ -62,11 +62,11 @@ func FetchTaskTemplates(model any, userId uint, dest any) *gorm.DB {
 	return DB.Model(model).Where("user_id = ?", userId).Order("created_at DESC").Find(dest)
 }
 
-func DeleteSessionByUserId(database *gorm.DB, userId any, model any) *gorm.DB {
+func DeleteSessionByUserId(database *gorm.DB, userId uint, model any) *gorm.DB {
 	return database.Model(model).Where("user_id = ?", userId).Delete(model)
 }
 
-func FetchSessionByUserId(userId any, model any, dest any) *gorm.DB {
+func FetchSessionByUserId(userId uint, model any, dest any) *gorm.DB {
 	return DB.Model(model).Where("user_id = ?", userId).First(dest)
 }
 
@@ -74,7 +74,7 @@ func FetchPassResetTokenByToken(hashedToken string, model any, dest any) *gorm.D
 	return DB.Model(model).Where("token_hash = ?", hashedToken).First(dest)
 }
 
-func UpdateUserPass(database *gorm.DB, model any, userId any, value map[string]any) *gorm.DB {
+func UpdateUserPass(database *gorm.DB, model any, userId uint, value map[string]any) *gorm.DB {
 	return database.Model(model).Where("user_id = ?", userId).Select("password_hash", "pass_changed_at").Updates(value)
 }
 
@@ -82,6 +82,26 @@ func DeletePassResetToken(database *gorm.DB, tokenId any, model any) *gorm.DB {
 	return database.Model(model).Where("id = ?", tokenId).Delete(model)
 }
 
-func DeletePassResetTokenByUserId(database *gorm.DB, userId any, model any) *gorm.DB {
+func DeletePassResetTokenByUserId(database *gorm.DB, userId uint, model any) *gorm.DB {
 	return database.Model(model).Where("user_id = ?", userId).Delete(model)
+}
+
+func FetchDeviceToken(token string, model any, dest any) *gorm.DB {
+	return DB.Model(model).Where("token = ?", token).First(dest)
+}
+
+func DeactivateDeviceTokenBySessionId(sessionId string, model any) *gorm.DB {
+	return DB.Model(model).Where("session_id = ?", sessionId).Updates(map[string]any{
+		"is_active": false,
+	})
+}
+
+func UpdateDeviceToken(database *gorm.DB, tokenId uint, value any, model any) *gorm.DB {
+	return database.Model(model).Where("id = ?", tokenId).Updates(value)
+}
+
+func DeactivateDeviceToken(database *gorm.DB, token string, userId uint, model any) *gorm.DB {
+	return database.Model(model).Where("token = ? AND user_id = ?", token, userId).Updates(map[string]any{
+		"is_active": false,
+	})
 }

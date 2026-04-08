@@ -11,6 +11,7 @@ import (
 
 	"github.com/BarisNKorkmaz/taskManager/database"
 	"github.com/BarisNKorkmaz/taskManager/middleware"
+	"github.com/BarisNKorkmaz/taskManager/modules/notification"
 	"github.com/BarisNKorkmaz/taskManager/utils"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v3"
@@ -83,7 +84,7 @@ func RegisterHandler(c fiber.Ctx) error {
 		})
 	}
 
-	tokens := GenerateRefreshToken(user.UserID, user.Email)
+	tokens := GenerateRefreshToken(user.UserID, user.Email, c.IP())
 
 	if tokens.err != nil {
 		return c.Status(201).JSON(fiber.Map{
@@ -155,7 +156,7 @@ func LoginHandler(c fiber.Ctx) error {
 		})
 	}
 
-	tokens := GenerateRefreshToken(user.UserID, user.Email)
+	tokens := GenerateRefreshToken(user.UserID, user.Email, c.IP())
 
 	if tokens.err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -215,7 +216,7 @@ func RefreshHandler(c fiber.Ctx) error {
 		})
 	}
 
-	res := ValidateRefreshToken(refreshToken)
+	res := ValidateRefreshToken(refreshToken, c.IP())
 
 	if res.err != nil {
 		c.ClearCookie("refresh_token")
@@ -239,6 +240,8 @@ func RefreshHandler(c fiber.Ctx) error {
 
 func LogoutHandler(c fiber.Ctx) error {
 	refreshToken := c.Cookies("refresh_token")
+	sessionId := c.Locals("sessionId").(string)
+	uid := c.Locals("userId").(uint)
 	if refreshToken == "" {
 		return c.Status(401).JSON(fiber.Map{
 			"message": "Unauthorized",
@@ -246,7 +249,12 @@ func LogoutHandler(c fiber.Ctx) error {
 		})
 	}
 
-	uid := c.Locals("userId").(uint)
+	if tx := database.DeactivateDeviceTokenBySessionId(sessionId, &notification.DeviceToken{}); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
 
 	if tx := database.DeleteSessionByUserId(database.DB, uid, &Session{}); tx.Error != nil {
 		return c.Status(500).JSON(fiber.Map{

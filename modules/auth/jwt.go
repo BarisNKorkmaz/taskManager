@@ -48,7 +48,7 @@ func GenerateAccessToken(userID uint, email string, sessionId string) (string, e
 
 }
 
-func GenerateRefreshToken(userID uint, email string) tokens {
+func GenerateRefreshToken(userID uint, email string, ipAddress string) tokens {
 
 	var res tokens
 	sessionId := uuid.New().String()
@@ -85,6 +85,7 @@ func GenerateRefreshToken(userID uint, email string) tokens {
 		ExpiresAt: claims.ExpiresAt.Time,
 		CreatedAt: claims.IssuedAt.Time,
 		ID:        sessionId,
+		IpAddress: ipAddress,
 		TokenHash: hex.EncodeToString(h.Sum(nil)),
 	}
 
