@@ -86,6 +86,7 @@ func GenerateRefreshToken(userID uint, email string, ipAddress string) tokens {
 		CreatedAt: claims.IssuedAt.Time,
 		ID:        sessionId,
 		IpAddress: ipAddress,
+		IsActive:  true,
 		TokenHash: hex.EncodeToString(h.Sum(nil)),
 	}
 

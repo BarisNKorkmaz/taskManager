@@ -45,6 +45,7 @@ type Session struct {
 	IpAddress string    `gorm:"not null" json:"ipAddress"`
 	ExpiresAt time.Time `gorm:"not null;index" json:"expiresAt"`
 	CreatedAt time.Time `gorm:"not null" json:"createdAt"`
+	IsActive  bool      `gorm:"not null;default:true" json:"isActive"`
 }
 
 type PasswordResetToken struct {

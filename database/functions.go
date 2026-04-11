@@ -63,11 +63,13 @@ func FetchTaskTemplates(model any, userId uint, dest any) *gorm.DB {
 }
 
 func DeleteSessionByUserId(database *gorm.DB, userId uint, model any) *gorm.DB {
-	return database.Model(model).Where("user_id = ?", userId).Delete(model)
+	return database.Model(model).Where("user_id = ?", userId).Updates(map[string]bool{
+		"is_avtive": true,
+	})
 }
 
 func FetchSessionByUserId(userId uint, model any, dest any) *gorm.DB {
-	return DB.Model(model).Where("user_id = ?", userId).First(dest)
+	return DB.Model(model).Where("user_id = ? AND is_active = ?", userId, true).First(dest)
 }
 
 func FetchPassResetTokenByToken(hashedToken string, model any, dest any) *gorm.DB {
