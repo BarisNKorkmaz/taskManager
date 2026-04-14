@@ -31,7 +31,7 @@ func FetchOccurenceByUID(userId uint, model any, dest any, now time.Time, finalD
 }
 
 func FetchUncompletedOccurrences(userId uint, model any, dest any, finalDate time.Time) *gorm.DB {
-	return DB.Model(model).Where("user_id = ? AND is_completed = ? AND due_date <= ?", userId, false, finalDate).Order("due_date ASC").Find(dest)
+	return DB.Model(model).Where("user_id = ? AND status = ? AND due_date <= ?", userId, "pending", finalDate).Order("due_date ASC").Find(dest)
 }
 
 func CreateOccurrencesBatch(database *gorm.DB, occs any, model any, batchSize int) *gorm.DB {
@@ -43,7 +43,7 @@ func FetchOccurenceByOccId(model any, occId any, userId uint, dest any) *gorm.DB
 }
 
 func UpdateOccStatus(model any, occId any, value any) *gorm.DB {
-	return DB.Model(model).Where("id = ?", occId).Select("is_completed", "completed_at", "due_date").Updates(value)
+	return DB.Model(model).Where("id = ?", occId).Select("status", "completed_at", "due_date").Updates(value)
 }
 
 func FetchTaskTemplateById(model any, id any, userId uint, dest any) *gorm.DB {
@@ -55,7 +55,7 @@ func UpdateTaskTemplate(database *gorm.DB, model any, taskId any, userId uint, v
 }
 
 func DeleteChangedOccs(database *gorm.DB, model any, taskId any, now time.Time, userId uint) *gorm.DB {
-	return database.Model(model).Where("task_id = ? AND user_id = ? AND due_date >= ? AND is_completed = ?", taskId, userId, now, false).Delete(model)
+	return database.Model(model).Where("task_id = ? AND user_id = ? AND due_date >= ? AND status = ?", taskId, userId, now, "pending").Delete(model)
 }
 
 func FetchTaskTemplates(model any, userId uint, dest any) *gorm.DB {

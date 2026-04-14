@@ -132,10 +132,10 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 	if !task.IsRepeatEnabled {
 
 		occ := TaskOccurrence{
-			TaskID:      task.ID,
-			UserID:      userID,
-			DueDate:     *task.DueDate,
-			IsCompleted: false,
+			TaskID:  task.ID,
+			UserID:  userID,
+			DueDate: *task.DueDate,
+			Status:  "pending",
 		}
 
 		if tx := database.Create(atomicDB, &occ, &TaskOccurrence{}); tx.Error != nil {
@@ -218,7 +218,7 @@ func DashboardHandler(c fiber.Ctx) error {
 				Title:       taskTemplatesMap[occ.TaskID].Title,
 				Description: taskTemplatesMap[occ.TaskID].Description,
 				DueDate:     occ.DueDate,
-				IsCompleted: occ.IsCompleted,
+				Status:      occ.Status,
 			})
 		} else if !occ.DueDate.After(weekEnd) {
 			thisWeek = append(thisWeek, DashboardOccurrenceDTO{
@@ -227,7 +227,7 @@ func DashboardHandler(c fiber.Ctx) error {
 				Title:       taskTemplatesMap[occ.TaskID].Title,
 				Description: taskTemplatesMap[occ.TaskID].Description,
 				DueDate:     occ.DueDate,
-				IsCompleted: occ.IsCompleted,
+				Status:      occ.Status,
 			})
 		} else {
 			thisMonth = append(thisMonth, DashboardOccurrenceDTO{
@@ -236,7 +236,7 @@ func DashboardHandler(c fiber.Ctx) error {
 				Title:       taskTemplatesMap[occ.TaskID].Title,
 				Description: taskTemplatesMap[occ.TaskID].Description,
 				DueDate:     occ.DueDate,
-				IsCompleted: occ.IsCompleted,
+				Status:      occ.Status,
 			})
 		}
 	}
@@ -363,39 +363,45 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 	switch action {
 	case "complete":
 
-		if occ.IsCompleted {
+		if occ.Status == "completed" {
 			return c.Status(409).JSON(fiber.Map{
 				"message": "Conflict",
-				"error":   "occurrence is already completed or skipped",
+				"error":   "occurrence is already completed",
 			})
 		}
 
-		occ.IsCompleted = true
+		occ.Status = "completed"
 		occ.CompletedAt = now
 
 		resMessage = "task completed"
 
 	case "undo":
-		if !occ.IsCompleted {
+		if occ.Status == "pending" {
 			return c.Status(409).JSON(fiber.Map{
 				"message": "Conflict",
 				"error":   "occurrence is already pending",
 			})
 		}
-		occ.IsCompleted = false
+		occ.Status = "pending"
 		occ.CompletedAt = nil
 
 		resMessage = "task completion undone"
 
 	case "skip":
-		occ.IsCompleted = true
-		occ.CompletedAt = now
-
+		if occ.Status == "skipped" {
+			return c.Status(409).JSON(fiber.Map{
+				"message": "Conflict",
+				"error":   "occurrence is already skipped",
+			})
+		}
+		occ.Status = "skipped"
+		occ.CompletedAt = nil
 		resMessage = "task skipped"
 
 	case "reschedule":
 		occ.DueDate = *data.NewDueDate
-
+		occ.Status = "pending"
+		occ.CompletedAt = nil
 		resMessage = "task rescheduled"
 
 	default:
@@ -429,7 +435,7 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 		"message":      resMessage,
 		"action":       action,
 		"occurrenceId": occ.ID,
-		"status":       occ.IsCompleted,
+		"status":       occ.Status,
 		"dueDate":      occ.DueDate,
 		"completedAt":  occ.CompletedAt,
 	})
@@ -544,10 +550,10 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 			}
 
 			occ := TaskOccurrence{
-				TaskID:      template.ID,
-				UserID:      uid,
-				DueDate:     *template.DueDate,
-				IsCompleted: false,
+				TaskID:  template.ID,
+				UserID:  uid,
+				DueDate: *template.DueDate,
+				Status:  "pending",
 			}
 
 			if tx := database.Create(atomicDB, &occ, &TaskOccurrence{}); tx.Error != nil {
@@ -703,10 +709,10 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 	} else {
 		if !template.IsRepeatEnabled && !template.DueDate.Before(*now) {
 			occ := &TaskOccurrence{
-				TaskID:      template.ID,
-				UserID:      uid,
-				DueDate:     *template.DueDate,
-				IsCompleted: false,
+				TaskID:  template.ID,
+				UserID:  uid,
+				DueDate: *template.DueDate,
+				Status:  "pending",
 			}
 
 			if tx := database.Create(atomicDb, occ, &TaskOccurrence{}); tx.Error != nil {
@@ -901,10 +907,10 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd
 		}
 
 		missingOccurrence = append(missingOccurrence, TaskOccurrence{
-			TaskID:      wanted.TaskID,
-			UserID:      uid,
-			DueDate:     wanted.DueDate,
-			IsCompleted: false,
+			TaskID:  wanted.TaskID,
+			UserID:  uid,
+			DueDate: wanted.DueDate,
+			Status:  "pending",
 		})
 	}
 	if len(missingOccurrence) > 0 {
@@ -973,7 +979,7 @@ func GetTodayOccs(c fiber.Ctx) error {
 				Title:       taskTemplatesMap[occ.TaskID].Title,
 				Description: taskTemplatesMap[occ.TaskID].Description,
 				DueDate:     occ.DueDate,
-				IsCompleted: occ.IsCompleted,
+				Status:      occ.Status,
 			})
 		} else if !dueNorm.After(*today) || occ.DueDate.Equal(*today) {
 			todayOccs = append(todayOccs, DashboardOccurrenceDTO{
@@ -982,7 +988,7 @@ func GetTodayOccs(c fiber.Ctx) error {
 				Title:       taskTemplatesMap[occ.TaskID].Title,
 				Description: taskTemplatesMap[occ.TaskID].Description,
 				DueDate:     occ.DueDate,
-				IsCompleted: occ.IsCompleted,
+				Status:      occ.Status,
 			})
 		} else {
 			fmt.Println("----------------------------DEBUG TIME-------------------------------------------")

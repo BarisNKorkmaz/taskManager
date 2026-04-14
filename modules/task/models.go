@@ -23,11 +23,11 @@ type TaskTemplate struct {
 }
 
 type TaskOccurrence struct {
-	ID          uint       `gorm:"primaryKey;autoIncrement" json:"id"`
-	TaskID      uint       `gorm:"not null;uniqueIndex:ux_task_due;index" json:"taskId"`
-	UserID      uint       `gorm:"not null;index:idx_occ_user_due;index:idx_occ_user_completed_due" json:"userId"`
-	DueDate     time.Time  `gorm:"not null;type:date;uniqueIndex:ux_task_due;index:idx_occ_user_due;index:idx_occ_user_completed_due" json:"dueDate"`
-	IsCompleted bool       `gorm:"not null;default:false;index:idx_occ_user_completed_due" json:"isCompleted"`
+	ID      uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	TaskID  uint      `gorm:"not null;uniqueIndex:ux_task_due;index" json:"taskId"`
+	UserID  uint      `gorm:"not null;index:idx_occ_user_due;index:idx_occ_user_status_due" json:"userId"`
+	DueDate time.Time `gorm:"not null;type:date;uniqueIndex:ux_task_due;index:idx_occ_user_due;index:idx_occ_user_status_due" json:"dueDate"`
+	Status      string     `gorm:"type:varchar(20);not null;default:'pending';index:idx_occ_user_status_due" json:"status"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 	CreatedAt   time.Time  `json:"createdAt"` // TODO auto inc.
 	UpdatedAt   time.Time  `json:"updatedAt"` // TODO auto inc.
@@ -76,5 +76,5 @@ type DashboardOccurrenceDTO struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	DueDate     time.Time `json:"dueDate"`
-	IsCompleted bool      `json:"isCompleted"`
+	Status      string    `json:"status"`
 }
