@@ -124,3 +124,36 @@ func DeletePushTokenHandler(c fiber.Ctx) error {
 		"message": "Device token successfully deactivated",
 	})
 }
+
+func TestPushHandler(c fiber.Ctx) error {
+	uid := c.Locals("userId").(uint)
+	deviceToken := new(DeviceToken)
+
+	if tx := database.FetchDeviceTokenByUserId(uid, &DeviceToken{}, deviceToken); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	id, err := SendPushToToken(deviceToken.Token, "7Planner Test", "Push is working!!!")
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return c.Status(404).JSON(fiber.Map{
+				"message": "anyactive FCM token not found for this user",
+				"error":   err.Error(),
+			})
+		}
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   err.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"message":        "Notification sent successfully",
+		"notificationId": id,
+	})
+
+}

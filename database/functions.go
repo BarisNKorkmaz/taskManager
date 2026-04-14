@@ -63,8 +63,8 @@ func FetchTaskTemplates(model any, userId uint, dest any) *gorm.DB {
 }
 
 func DeleteSessionByUserId(database *gorm.DB, userId uint, model any) *gorm.DB {
-	return database.Model(model).Where("user_id = ?", userId).Updates(map[string]bool{
-		"is_avtive": true,
+	return database.Model(model).Where("user_id = ?", userId).Updates(map[string]interface{}{
+		"is_active": false,
 	})
 }
 
@@ -106,4 +106,8 @@ func DeactivateDeviceToken(database *gorm.DB, token string, userId uint, model a
 	return database.Model(model).Where("token = ? AND user_id = ?", token, userId).Updates(map[string]any{
 		"is_active": false,
 	})
+}
+
+func FetchDeviceTokenByUserId(userId uint, model any, dest any) *gorm.DB {
+	return DB.Model(model).Where("user_id = ? AND is_active = ?", userId, true).First(dest)
 }

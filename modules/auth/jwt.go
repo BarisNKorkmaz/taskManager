@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/BarisNKorkmaz/taskManager/database"
+	"github.com/BarisNKorkmaz/taskManager/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -103,6 +104,7 @@ func GenerateRefreshToken(userID uint, email string, ipAddress string) tokens {
 
 	if tx := database.DeleteSessionByUserId(atomicDB, userID, &Session{}); tx.Error != nil {
 		atomicDB.Rollback()
+		middleware.Log.Error("delete session error", "err", tx.Error.Error())
 		res = tokens{
 			accessToken:  "",
 			refreshToken: "",
@@ -113,6 +115,7 @@ func GenerateRefreshToken(userID uint, email string, ipAddress string) tokens {
 
 	if tx := database.Create(atomicDB, &session, &Session{}); tx.Error != nil {
 		atomicDB.Rollback()
+		middleware.Log.Error("create session error", "err", tx.Error.Error())
 		res = tokens{
 			accessToken:  "",
 			refreshToken: "",
@@ -123,6 +126,7 @@ func GenerateRefreshToken(userID uint, email string, ipAddress string) tokens {
 
 	if tx := atomicDB.Commit(); tx.Error != nil {
 		atomicDB.Rollback()
+		middleware.Log.Error("atomic commit error", "err", tx.Error.Error())
 		res = tokens{
 			accessToken:  "",
 			refreshToken: "",

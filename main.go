@@ -23,6 +23,22 @@ func main() {
 		middleware.Log.Error("Error loading .env file", "err", err)
 	}
 
+	port := os.Getenv("APP_PORT")
+	if port == "" {
+		middleware.Log.Error("APP_PORT env not set")
+		os.Exit(1)
+	}
+
+	fbCredantialPath := os.Getenv("FIREBASE_CREDENTIALS_PATH")
+	if fbCredantialPath == "" {
+		middleware.Log.Error("FIREBASE_CREDENTIALS_PATH env not set")
+		os.Exit(1)
+	}
+	if fbErr := notification.InitFirebase(fbCredantialPath); fbErr != nil {
+		middleware.Log.Error("error initializing firebase app", "err", fbErr.Error())
+		os.Exit(1)
+	}
+
 	if err := database.Connect(); err != nil {
 		middleware.Log.Error("Server starting operation failed:", "err", err.Error())
 		os.Exit(1)
@@ -59,6 +75,8 @@ func main() {
 
 	protected := app.Group("/u", auth.AccessTokenMiddleware())
 
+	protected.Get("/u/devices/test-push", notification.TestPushHandler)
+
 	protected.Get("/auth/me", auth.MeHandler)
 	protected.Post("/auth/logout", auth.LogoutHandler)
 
@@ -75,13 +93,6 @@ func main() {
 	protected.Get("/tasks/today", task.GetTodayOccs)
 
 	protected.Patch("/tasks/occurrences/:id/status", task.UpdateOccStatusHandler)
-
-	port := os.Getenv("APP_PORT")
-	if port == "" {
-		middleware.Log.Error("APP_PORT env not set")
-		os.Exit(1)
-	}
-
 	middleware.Log.Info("Starting server on :" + port)
 
 	if err := app.Listen(":" + port); err != nil {
