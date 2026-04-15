@@ -2,13 +2,27 @@ package task
 
 import "time"
 
+type CategoryType string
+
+const (
+	Work     CategoryType = "work"
+	Personal CategoryType = "personal"
+	Health   CategoryType = "health"
+	Finance  CategoryType = "finance"
+	Learning CategoryType = "learning"
+	Home     CategoryType = "home"
+	Social   CategoryType = "social"
+	Other    CategoryType = "other"
+)
+
 type TaskTemplate struct {
-	ID              uint   `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID          uint   `gorm:"not null;index" json:"userId"`
-	Title           string `gorm:"size:120;not null" json:"title"`
-	Description     string `gorm:"size:255" json:"description,omitempty"`
-	IsRepeatEnabled bool   `gorm:"not null;default:false" json:"isRepeatEnabled"`
-	IsActive        bool   `gorm:"not null;default:true;index" json:"isActive"`
+	ID              uint         `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID          uint         `gorm:"not null;index" json:"userId"`
+	Title           string       `gorm:"size:120;not null" json:"title"`
+	Description     string       `gorm:"size:255" json:"description,omitempty"`
+	IsRepeatEnabled bool         `gorm:"not null;default:false" json:"isRepeatEnabled"`
+	IsActive        bool         `gorm:"not null;default:true;index" json:"isActive"`
+	Category        CategoryType `gorm:"type:varchar(20);column:category;default:'other';not null;check:category IN ('work', 'personal', 'health', 'finance', 'learning', 'home', 'social', 'other')" json:"category"`
 
 	// if IsRepeatEnabled false
 	DueDate *time.Time `gorm:"type:date" json:"dueDate,omitempty"`
@@ -23,10 +37,10 @@ type TaskTemplate struct {
 }
 
 type TaskOccurrence struct {
-	ID      uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	TaskID  uint      `gorm:"not null;uniqueIndex:ux_task_due;index" json:"taskId"`
-	UserID  uint      `gorm:"not null;index:idx_occ_user_due;index:idx_occ_user_status_due" json:"userId"`
-	DueDate time.Time `gorm:"not null;type:date;uniqueIndex:ux_task_due;index:idx_occ_user_due;index:idx_occ_user_status_due" json:"dueDate"`
+	ID          uint       `gorm:"primaryKey;autoIncrement" json:"id"`
+	TaskID      uint       `gorm:"not null;uniqueIndex:ux_task_due;index" json:"taskId"`
+	UserID      uint       `gorm:"not null;index:idx_occ_user_due;index:idx_occ_user_status_due" json:"userId"`
+	DueDate     time.Time  `gorm:"not null;type:date;uniqueIndex:ux_task_due;index:idx_occ_user_due;index:idx_occ_user_status_due" json:"dueDate"`
 	Status      string     `gorm:"type:varchar(20);not null;default:'pending';index:idx_occ_user_status_due" json:"status"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 	CreatedAt   time.Time  `json:"createdAt"` // TODO auto inc.
@@ -36,6 +50,7 @@ type TaskOccurrence struct {
 type TaskDTO struct {
 	Title       string `json:"title" validate:"required,min=2,max=120"`
 	Description string `json:"description" validate:"omitempty,max=500"`
+	Category    string `json:"category" validate:"oneof=work personal health finance learning home social other"`
 
 	IsRepeatEnabled bool `json:"isRepeatEnabled"`
 
@@ -56,6 +71,7 @@ type TaskActionDTO struct {
 type UpdateTemplateDTO struct {
 	Title       *string `json:"title" validate:"omitempty,min=1,max=120"`
 	Description *string `json:"description,omitempty" validate:"omitempty,max=255"`
+	Category    *string `json:"category,omitempty" validate:"omitempty,oneof=work personal health finance learning home social other"`
 
 	// Eğer gönderilirse geçerli bir tarih olmalı
 	DueDate *time.Time `json:"dueDate,omitempty" validate:"omitempty"`
@@ -71,10 +87,11 @@ type SetTemplateStatusDTO struct {
 }
 
 type DashboardOccurrenceDTO struct {
-	ID          uint      `json:"id"`
-	TaskID      uint      `json:"taskId"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	DueDate     time.Time `json:"dueDate"`
-	Status      string    `json:"status"`
+	ID          uint         `json:"id"`
+	TaskID      uint         `json:"taskId"`
+	Title       string       `json:"title"`
+	Description string       `json:"description"`
+	Category    CategoryType `json:"category"`
+	DueDate     time.Time    `json:"dueDate"`
+	Status      string       `json:"status"`
 }

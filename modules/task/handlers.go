@@ -62,6 +62,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 	task.UserID = userID
 	task.Title = data.Title
 	task.Description = data.Description
+	task.Category = CategoryType(data.Category)
 
 	if data.IsRepeatEnabled {
 
@@ -178,8 +179,6 @@ func DashboardHandler(c fiber.Ctx) error {
 	weekEnd := datetime.EndOfWeek(*now, time.Sunday)
 	monthEnd := datetime.EndOfMonth(*now)
 
-	fmt.Printf("now: %s, weekend: %s, monthend: %s", now.String(), weekEnd.String(), monthEnd.String())
-
 	var taskTemplates []TaskTemplate
 	if tx := database.FetchTasksByUID(uid, &TaskTemplate{}, &taskTemplates); tx.Error != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -188,7 +187,7 @@ func DashboardHandler(c fiber.Ctx) error {
 		})
 	}
 
-	taskTemplatesMap, generateErr := generateOcc(taskTemplates, uid, *now, monthEnd)
+	taskTemplatesMap, generateErr := generateOcc(taskTemplates, uid, *now, monthEnd) //TODO CHECK FUNC
 
 	if generateErr != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -475,7 +474,7 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 		})
 	}
 
-	if data.Description == nil && data.DueDate == nil && data.RepeatInterval == nil && data.RepeatUnit == nil && data.StartDate == nil && data.Title == nil {
+	if data.Description == nil && data.DueDate == nil && data.RepeatInterval == nil && data.RepeatUnit == nil && data.StartDate == nil && data.Title == nil && data.Category == nil {
 		return c.Status(400).JSON(fiber.Map{
 			"message": "Bad request",
 			"error":   "Invalid request payload. Please check your data format.",
@@ -588,29 +587,24 @@ func StructToUpdateMap(data interface{}) map[string]any {
 	v := reflect.ValueOf(data)
 	t := reflect.TypeOf(data)
 
-	// Eğer data bir pointer ise asıl objeye git (Dereference)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 		t = t.Elem()
 	}
 
 	for i := 0; i < v.NumField(); i++ {
-		fieldVal := v.Field(i)  // Alanın değeri
-		fieldType := t.Field(i) // Alanın meta verisi (Tag vb.)
+		fieldVal := v.Field(i)
+		fieldType := t.Field(i)
 
-		// Sadece pointer olan ve nil olmayan alanları kontrol et
 		if fieldVal.Kind() == reflect.Ptr {
 			if !fieldVal.IsNil() {
-				// JSON tag'ini anahtar olarak al, yoksa field ismini kullan
 				key := fieldType.Tag.Get("json")
 				if key == "" || key == "-" {
 					key = fieldType.Name
 				} else {
-					// "title,omitempty" gibi durumlarda virgül sonrasını at
 					key = strings.Split(key, ",")[0]
 				}
 
-				// Pointer'ın gösterdiği asıl değeri map'e ekle
 				update[key] = fieldVal.Elem().Interface()
 			}
 		}
@@ -774,7 +768,6 @@ func GetTaskTemplatesHandler(c fiber.Ctx) error {
 
 }
 
-// GET /taskTemplates/:id
 func GetTemplateDetailHandler(c fiber.Ctx) error {
 	uid := c.Locals("userId").(uint)
 	templateIdStr := c.Params("id")
@@ -978,6 +971,7 @@ func GetTodayOccs(c fiber.Ctx) error {
 				TaskID:      occ.TaskID,
 				Title:       taskTemplatesMap[occ.TaskID].Title,
 				Description: taskTemplatesMap[occ.TaskID].Description,
+				Category:    taskTemplatesMap[occ.TaskID].Category,
 				DueDate:     occ.DueDate,
 				Status:      occ.Status,
 			})
@@ -987,17 +981,18 @@ func GetTodayOccs(c fiber.Ctx) error {
 				TaskID:      occ.TaskID,
 				Title:       taskTemplatesMap[occ.TaskID].Title,
 				Description: taskTemplatesMap[occ.TaskID].Description,
+				Category:    taskTemplatesMap[occ.TaskID].Category,
 				DueDate:     occ.DueDate,
 				Status:      occ.Status,
 			})
-		} else {
+		} /* else {
 			fmt.Println("----------------------------DEBUG TIME-------------------------------------------")
 			fmt.Println(occ.TaskID)
 			fmt.Println(occ.DueDate)
 			fmt.Println(dueNorm)
 			fmt.Println(*today)
 			fmt.Println(" ")
-		}
+		} */
 	}
 
 	return c.Status(200).JSON(fiber.Map{
