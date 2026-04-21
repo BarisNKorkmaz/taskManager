@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/BarisNKorkmaz/taskManager/database"
+	"github.com/BarisNKorkmaz/taskManager/middleware"
 	"github.com/BarisNKorkmaz/taskManager/modules/auth"
 	"github.com/BarisNKorkmaz/taskManager/utils"
 	"github.com/duke-git/lancet/v2/datetime"
@@ -28,6 +29,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 		})
 	}
 
+	data.RepeatType = strings.ToLower(data.RepeatType)
 	if errs := utils.Validate.Struct(data); errs != nil {
 		var messages []string
 		valErrs := errs.(validator.ValidationErrors)
@@ -64,19 +66,20 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 	task.Description = data.Description
 	task.Category = CategoryType(data.Category)
 
-	if data.IsRepeatEnabled {
+	switch data.RepeatType {
 
-		if data.RepeatUnit == nil {
+	case "interval":
+		if data.RepeatUnit == nil || *data.RepeatUnit == "" {
 			return c.Status(400).JSON(fiber.Map{
 				"message": "Bad request",
-				"error":   "repeatUnit value must be one of = day, week or month when isRepeatEnabled is true",
+				"error":   "repeatUnit value must be one of = day, week or month when repeatType value is interval",
 			})
 		}
 
-		if data.RepeatInterval == nil {
+		if data.RepeatInterval == nil || *data.RepeatInterval <= 0 {
 			return c.Status(400).JSON(fiber.Map{
 				"message": "Bad request",
-				"error":   "repeatInterval can't be null when isRepeatEnabled is true",
+				"error":   "repeatInterval must be greater than 0 when repeatType is interval",
 			})
 		}
 
@@ -93,15 +96,17 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 			data.StartDate = startDate
 		}
 
-		task.IsRepeatEnabled = true
+		task.RepeatType = data.RepeatType
 		task.RepeatUnit = data.RepeatUnit
 		task.RepeatInterval = data.RepeatInterval
 		task.StartDate = data.StartDate
-	} else {
-		task.IsRepeatEnabled = false
+		break
+
+	case "once":
+		task.RepeatType = data.RepeatType
 		if data.DueDate == nil {
 			return c.Status(400).JSON(fiber.Map{
-				"message": "if isRepeatEnabled is false, dueDate value can't be null",
+				"message": "if repeatType value is once, dueDate value can't be null",
 			})
 		}
 		dueDate, err := NormalizeToUserDate(*data.DueDate, user.Timezone)
@@ -112,6 +117,46 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 			})
 		}
 		task.DueDate = dueDate
+		break
+	case "weekly":
+		task.RepeatType = data.RepeatType
+		if data.WeekDays == nil || *data.WeekDays == "" {
+			return c.Status(400).JSON(fiber.Map{
+				"message": "if repeatType is weekly, weekDays value can't be null",
+			})
+		}
+
+		days := strings.Split(*data.WeekDays, ",")
+		seenDays := make(map[int]bool)
+
+		for _, dayStr := range days {
+			dayInt, err := strconv.Atoi(strings.TrimSpace(dayStr))
+
+			if err != nil || dayInt < 0 || dayInt > 6 {
+				return c.Status(400).JSON(fiber.Map{
+					"message": "Bad request",
+					"error":   fmt.Sprintf("invalid weekDay value: %s. Must be numbers between 0-6 separated by commas", dayStr),
+				})
+			}
+
+			if seenDays[dayInt] {
+				return c.Status(400).JSON(fiber.Map{
+					"message": "Bad request",
+					"error":   fmt.Sprintf("duplicate day detected: %d. Each day must be unique", dayInt),
+				})
+			}
+			seenDays[dayInt] = true
+		}
+
+		task.StartDate = getLocalDate(*user)
+		task.WeekDays = data.WeekDays
+		break
+
+	default:
+		return c.Status(400).JSON(fiber.Map{
+			"message": "Bad request",
+			"error":   "invalid repeatType",
+		})
 	}
 
 	atomicDB := database.DB.Begin()
@@ -130,7 +175,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 		})
 	}
 
-	if !task.IsRepeatEnabled {
+	if task.RepeatType == "once" {
 
 		occ := TaskOccurrence{
 			TaskID:  task.ID,
@@ -180,6 +225,7 @@ func DashboardHandler(c fiber.Ctx) error {
 	monthEnd := datetime.EndOfMonth(*now)
 
 	var taskTemplates []TaskTemplate
+
 	if tx := database.FetchTasksByUID(uid, &TaskTemplate{}, &taskTemplates); tx.Error != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
@@ -187,7 +233,7 @@ func DashboardHandler(c fiber.Ctx) error {
 		})
 	}
 
-	taskTemplatesMap, generateErr := generateOcc(taskTemplates, uid, *now, monthEnd) //TODO CHECK FUNC
+	taskTemplatesMap, generateErr := generateOcc(taskTemplates, uid, *now, monthEnd)
 
 	if generateErr != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -216,6 +262,7 @@ func DashboardHandler(c fiber.Ctx) error {
 				TaskID:      occ.TaskID,
 				Title:       taskTemplatesMap[occ.TaskID].Title,
 				Description: taskTemplatesMap[occ.TaskID].Description,
+				Category:    taskTemplatesMap[occ.TaskID].Category,
 				DueDate:     occ.DueDate,
 				Status:      occ.Status,
 			})
@@ -225,6 +272,7 @@ func DashboardHandler(c fiber.Ctx) error {
 				TaskID:      occ.TaskID,
 				Title:       taskTemplatesMap[occ.TaskID].Title,
 				Description: taskTemplatesMap[occ.TaskID].Description,
+				Category:    taskTemplatesMap[occ.TaskID].Category,
 				DueDate:     occ.DueDate,
 				Status:      occ.Status,
 			})
@@ -234,6 +282,7 @@ func DashboardHandler(c fiber.Ctx) error {
 				TaskID:      occ.TaskID,
 				Title:       taskTemplatesMap[occ.TaskID].Title,
 				Description: taskTemplatesMap[occ.TaskID].Description,
+				Category:    taskTemplatesMap[occ.TaskID].Category,
 				DueDate:     occ.DueDate,
 				Status:      occ.Status,
 			})
@@ -495,12 +544,18 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 		})
 	}
 
-	if template.IsRepeatEnabled {
+	switch template.RepeatType {
+	case "interval":
 		data.DueDate = nil
-	} else {
+	case "once":
 		data.RepeatInterval = nil
 		data.RepeatUnit = nil
 		data.StartDate = nil
+	case "weekly":
+		data.RepeatInterval = nil
+		data.RepeatUnit = nil
+		data.StartDate = nil
+		data.DueDate = nil
 	}
 
 	user := new(auth.User)
@@ -538,7 +593,7 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 			})
 		}
 
-		if !template.IsRepeatEnabled {
+		if template.RepeatType == "once" {
 
 			if tx := database.FetchTaskTemplateById(&TaskTemplate{}, taskId, uid, template); tx.Error != nil {
 				atomicDB.Rollback()
@@ -548,10 +603,15 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 				})
 			}
 
+			newDueDate := template.DueDate // Default olarak eskisi kalsın
+			if data.DueDate != nil {
+				newDueDate = data.DueDate
+			}
+
 			occ := TaskOccurrence{
 				TaskID:  template.ID,
 				UserID:  uid,
-				DueDate: *template.DueDate,
+				DueDate: *newDueDate,
 				Status:  "pending",
 			}
 
@@ -660,6 +720,8 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 		})
 	}
 
+	fmt.Printf("DEBUG: Incoming IsActive: %v, DB IsActive: %v\n", *data.IsActive, template.IsActive)
+
 	if template.IsActive == *data.IsActive {
 		return c.Status(200).JSON(fiber.Map{
 			"message":  "Task status already set",
@@ -701,7 +763,8 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 			})
 		}
 	} else {
-		if !template.IsRepeatEnabled && !template.DueDate.Before(*now) {
+		fmt.Printf("DEBUG: DueDate: %v, Now: %v, Before: %v\n", template.DueDate, *now, template.DueDate.Before(*now))
+		if template.RepeatType == "once" && !template.DueDate.Before(*now) {
 			occ := &TaskOccurrence{
 				TaskID:  template.ID,
 				UserID:  uid,
@@ -810,76 +873,118 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd
 	taskTemplatesMap := make(map[uint]TaskTemplate)
 
 	var wantedOccurrence []OccKey
+	fmt.Println(taskTemplates)
 	for _, template := range taskTemplates {
 
 		taskTemplatesMap[template.ID] = template
 
-		if !template.IsRepeatEnabled || !template.IsActive {
-			continue
-		}
-		if template.RepeatUnit == nil || template.StartDate == nil || template.RepeatInterval == nil {
-			continue
-		}
-		if *template.RepeatInterval <= 0 {
+		if template.RepeatType == "once" || !template.IsActive {
 			continue
 		}
 
-		switch strings.ToLower(*template.RepeatUnit) {
+		switch strings.ToLower(template.RepeatType) {
 
-		case "day":
+		case "weekly":
 
-			dueDate := *template.StartDate
+			selectedDays := make(map[time.Weekday]bool)
 
-			for dueDate.Before(now) {
-				dueDate = dueDate.AddDate(0, 0, *template.RepeatInterval)
+			parsedWeekDays := strings.ReplaceAll(*template.WeekDays, " ", "")
+
+			for _, dayStr := range strings.Split(parsedWeekDays, ",") {
+				dayInt, _ := strconv.Atoi(dayStr)
+				selectedDays[time.Weekday(dayInt)] = true
+			}
+			//debug zone
+			fmt.Printf("rawWeekDays: %s, Selected Days: %v", *template.WeekDays, selectedDays)
+
+			weekDay := int(now.Weekday())
+
+			if weekDay == 0 {
+				weekDay = 7
 			}
 
-			for !dueDate.After(monthEnd) {
-				wantedOccurrence = append(wantedOccurrence, OccKey{
-					TaskID:  template.ID,
-					DueDate: dueDate,
-				})
-				dueDate = dueDate.AddDate(0, 0, *template.RepeatInterval)
+			currentWeekStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
+				AddDate(0, 0, -(weekDay - 1))
+			limit := now.AddDate(0, 0, 31)
+			for i := currentWeekStart; i.Before(limit); i = i.AddDate(0, 0, 1) {
+				dueDate := i
+
+				if dueDate.Before(now) {
+					continue
+				}
+
+				if selectedDays[dueDate.Weekday()] {
+					wantedOccurrence = append(wantedOccurrence, OccKey{
+						TaskID:  template.ID,
+						DueDate: dueDate,
+					})
+				}
 			}
 
-		case "week":
+		case "interval":
+			if template.RepeatUnit == nil || template.StartDate == nil || template.RepeatInterval == nil || *template.RepeatInterval <= 0 {
+				break
+			}
+			switch strings.ToLower(*template.RepeatUnit) {
+			case "day":
+				dueDate := *template.StartDate
 
-			dueDate := *template.StartDate
+				for dueDate.Before(now) {
+					dueDate = dueDate.AddDate(0, 0, *template.RepeatInterval)
+				}
 
-			for dueDate.Before(now) {
-				dueDate = dueDate.AddDate(0, 0, 7*(*template.RepeatInterval))
+				for !dueDate.After(monthEnd) {
+					wantedOccurrence = append(wantedOccurrence, OccKey{
+						TaskID:  template.ID,
+						DueDate: dueDate,
+					})
+					dueDate = dueDate.AddDate(0, 0, *template.RepeatInterval)
+				}
+
+			case "week":
+				dueDate := *template.StartDate
+
+				for dueDate.Before(now) {
+					dueDate = dueDate.AddDate(0, 0, 7*(*template.RepeatInterval))
+				}
+
+				for !dueDate.After(monthEnd) {
+					wantedOccurrence = append(wantedOccurrence, OccKey{
+						TaskID:  template.ID,
+						DueDate: dueDate,
+					})
+					dueDate = dueDate.AddDate(0, 0, 7*(*template.RepeatInterval))
+				}
+
+			case "month":
+				dueDate := *template.StartDate
+
+				for dueDate.Before(now) {
+					dueDate = dueDate.AddDate(0, *template.RepeatInterval, 0)
+				}
+
+				for !dueDate.After(monthEnd) {
+					wantedOccurrence = append(wantedOccurrence, OccKey{
+						TaskID:  template.ID,
+						DueDate: dueDate,
+					})
+					dueDate = dueDate.AddDate(0, *template.RepeatInterval, 0)
+				}
+
+			default:
+				break
 			}
 
-			for !dueDate.After(monthEnd) {
-				wantedOccurrence = append(wantedOccurrence, OccKey{
-					TaskID:  template.ID,
-					DueDate: dueDate,
-				})
-				dueDate = dueDate.AddDate(0, 0, 7*(*template.RepeatInterval))
-			}
-
-		case "month":
-			dueDate := *template.StartDate
-
-			for dueDate.Before(now) {
-				dueDate = dueDate.AddDate(0, *template.RepeatInterval, 0)
-			}
-
-			for !dueDate.After(monthEnd) {
-				wantedOccurrence = append(wantedOccurrence, OccKey{
-					TaskID:  template.ID,
-					DueDate: dueDate,
-				})
-				dueDate = dueDate.AddDate(0, *template.RepeatInterval, 0)
-			}
-
+		default:
+			middleware.Log.Error("Unexpected repeatType", "templateId", template.ID, "userId", uid, "repeatType", template.RepeatType)
+			break
 		}
 
 	}
 
 	var existingOccurence []OccKey
-
 	if tx := database.FetchOccurenceByUID(uid, &TaskOccurrence{}, &existingOccurence, now, monthEnd); tx.Error != nil {
+		fmt.Println("FetchOccurenceByUID error")
 		return nil, tx.Error
 	}
 
@@ -907,7 +1012,7 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd
 		})
 	}
 	if len(missingOccurrence) > 0 {
-		if tx := database.CreateOccurrencesBatch(database.DB, missingOccurrence, &TaskOccurrence{}, 200); tx.Error != nil {
+		if tx := database.CreateOccurrencesBatch(database.DB, missingOccurrence, &TaskOccurrence{}, 200); tx.Error != nil && !strings.Contains(tx.Error.Error(), "SQLSTATE 23505") {
 			return nil, tx.Error
 		}
 	}
@@ -933,7 +1038,7 @@ func GetTodayOccs(c fiber.Ctx) error {
 	var taskTemplates []TaskTemplate
 	var taskTemplatesMap map[uint]TaskTemplate
 
-	if tx := database.FetchTaskTemplates(&TaskTemplate{}, uid, &taskTemplates); tx.Error != nil {
+	if tx := database.FetchTasksByUID(uid, &TaskTemplate{}, &taskTemplates); tx.Error != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),

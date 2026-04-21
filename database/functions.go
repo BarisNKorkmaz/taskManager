@@ -23,7 +23,7 @@ func UpdateLastLogin(model any, query string, args ...any) *gorm.DB {
 }
 
 func FetchTasksByUID(userId uint, model any, dest any) *gorm.DB {
-	return DB.Model(model).Where("user_id = ? AND is_active = ? AND is_repeat_enabled = ?", userId, true, true).Find(dest)
+	return DB.Model(model).Where("user_id = ? AND is_active = ?", userId, true).Find(dest)
 }
 
 func FetchOccurenceByUID(userId uint, model any, dest any, now time.Time, finalDate time.Time) *gorm.DB {

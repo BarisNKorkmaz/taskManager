@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/BarisNKorkmaz/taskManager/database"
+	"github.com/BarisNKorkmaz/taskManager/middleware"
 	"github.com/BarisNKorkmaz/taskManager/modules/auth"
 	"github.com/gofiber/fiber/v3"
 	"github.com/joho/godotenv"
@@ -26,6 +27,8 @@ func TestMain(m *testing.M) {
 	if err := godotenv.Load("../../.env"); err != nil {
 		fmt.Printf("Warning: .env file not found: %v\n", err)
 	}
+
+	middleware.Init()
 
 	if err := setupTestDB(); err != nil {
 		fmt.Printf("Failed to setup test database: %v\n", err)
@@ -60,6 +63,11 @@ func setupTestDB() error {
 	}
 
 	database.DB = db
+	database.DB.Migrator().DropTable(&auth.User{}, &TaskTemplate{}, &TaskOccurrence{}, &auth.Session{})
+
+	if err := database.DB.AutoMigrate(&auth.User{}, &TaskTemplate{}, &TaskOccurrence{}, &auth.Session{}); err != nil {
+		return err
+	}
 
 	testUser = auth.User{
 		Name:          "Test",
@@ -70,13 +78,7 @@ func setupTestDB() error {
 		Timezone:      "Europe/Istanbul",
 	}
 
-	database.DB.Unscoped().Where("email = ?", testUser.Email).Delete(&auth.User{})
-
 	if err := database.DB.Create(&testUser).Error; err != nil {
-		return err
-	}
-
-	if err := database.DB.AutoMigrate(&auth.User{}, &TaskTemplate{}, &TaskOccurrence{}); err != nil {
 		return err
 	}
 
@@ -112,17 +114,32 @@ func cleanupTestData() {
 }
 
 func TestGetLocalDate(t *testing.T) {
-	user := auth.User{Timezone: "Europe/Istanbul"}
-	date := getLocalDate(user)
-	if date == nil {
-		t.Fatal("Expected date to be not nil")
-	}
+	t.Run("Valid Timezone", func(t *testing.T) {
+		user := auth.User{Timezone: "Europe/Istanbul"}
+		date := getLocalDate(user)
+		if date == nil {
+			t.Fatal("Expected date to be not nil")
+		}
 
-	loc, _ := time.LoadLocation("Europe/Istanbul")
-	now := time.Now().In(loc)
-	if date.Year() != now.Year() || date.Month() != now.Month() || date.Day() != now.Day() {
-		t.Errorf("Expected date %v, got %v", now.Format("2006-01-02"), date.Format("2006-01-02"))
-	}
+		loc, _ := time.LoadLocation("Europe/Istanbul")
+		now := time.Now().In(loc)
+		if date.Year() != now.Year() || date.Month() != now.Month() || date.Day() != now.Day() {
+			t.Errorf("Expected date %v, got %v", now.Format("2006-01-02"), date.Format("2006-01-02"))
+		}
+	})
+
+	t.Run("Invalid Timezone Defaults to UTC", func(t *testing.T) {
+		user := auth.User{Timezone: "Invalid/Timezone"}
+		date := getLocalDate(user)
+		if date == nil {
+			t.Fatal("Expected date to be not nil even for invalid timezone")
+		}
+
+		now := time.Now().UTC()
+		if date.Year() != now.Year() || date.Month() != now.Month() || date.Day() != now.Day() {
+			t.Errorf("Expected date %v (UTC), got %v", now.Format("2006-01-02"), date.Format("2006-01-02"))
+		}
+	})
 }
 
 func TestStructToUpdateMap(t *testing.T) {
@@ -153,11 +170,11 @@ func TestNormalizeToUserDate(t *testing.T) {
 func TestCreateTaskTemplateHandler(t *testing.T) {
 	dt := time.Now().AddDate(0, 0, 1)
 	taskReq := TaskDTO{
-		Title:           "Integration Test Task",
-		Description:     "Testing handler",
-		Category:        "other",
-		IsRepeatEnabled: false,
-		DueDate:         &dt,
+		Title:       "Integration Test Task",
+		Description: "Testing handler",
+		Category:    "other",
+		RepeatType:  "once",
+		DueDate:     &dt,
 	}
 
 	body, _ := json.Marshal(taskReq)
@@ -207,70 +224,252 @@ func TestDashboardHandler(t *testing.T) {
 }
 
 func TestGenerateOcc(t *testing.T) {
-	repeatUnit := "day"
-	repeatInterval := 1
-	start := time.Now()
-	template := TaskTemplate{
-		ID:              100,
-		UserID:          testUser.UserID,
-		Title:           "Recurring Task",
-		IsRepeatEnabled: true,
-		RepeatUnit:      &repeatUnit,
-		RepeatInterval:  &repeatInterval,
-		StartDate:       &start,
-	}
+	t.Run("Interval Day", func(t *testing.T) {
+		repeatUnit := "day"
+		repeatInterval := 2
+		// Start 3 days ago
+		start := time.Now().AddDate(0, 0, -3)
+		template := TaskTemplate{
+			ID:             100,
+			UserID:         testUser.UserID,
+			Title:          "Interval Day Task",
+			RepeatType:     "interval",
+			RepeatUnit:     &repeatUnit,
+			RepeatInterval: &repeatInterval,
+			StartDate:      &start,
+			IsActive:       true,
+		}
 
-	templates := []TaskTemplate{template}
-	now := time.Now()
-	monthEnd := now.AddDate(0, 1, 0)
+		templates := []TaskTemplate{template}
+		now := time.Now().Truncate(24 * time.Hour)
+		monthEnd := now.AddDate(0, 1, 0)
 
-	occMap, err := generateOcc(templates, testUser.UserID, now, monthEnd)
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
+		occMap, err := generateOcc(templates, testUser.UserID, now, monthEnd)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
 
-	if len(occMap) == 0 {
-		t.Errorf("Expected at least one occurrence in map")
-	}
+		if _, ok := occMap[template.ID]; !ok {
+			t.Errorf("Expected template ID 100 in map")
+		}
+
+		// Verify occurrences were created in DB
+		var count int64
+		database.DB.Model(&TaskOccurrence{}).Where("task_id = ?", template.ID).Count(&count)
+		if count == 0 {
+			t.Errorf("Expected occurrences to be created in DB")
+		}
+	})
+
+	t.Run("Weekly", func(t *testing.T) {
+		weekDays := "1,3,5" // Mon, Wed, Fri
+		template := TaskTemplate{
+			ID:         101,
+			UserID:     testUser.UserID,
+			Title:      "Weekly Task",
+			RepeatType: "weekly",
+			WeekDays:   &weekDays,
+			IsActive:   true,
+		}
+
+		templates := []TaskTemplate{template}
+		now := time.Now().Truncate(24 * time.Hour)
+		monthEnd := now.AddDate(0, 0, 14) // 2 weeks
+
+		_, err := generateOcc(templates, testUser.UserID, now, monthEnd)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+
+		var count int64
+		database.DB.Model(&TaskOccurrence{}).Where("task_id = ?", template.ID).Count(&count)
+		if count == 0 {
+			t.Errorf("Expected weekly occurrences to be created")
+		}
+	})
+
+	t.Run("Interval Month", func(t *testing.T) {
+		repeatUnit := "month"
+		repeatInterval := 1
+		start := time.Now().AddDate(0, -1, 0) // Start month ago
+		template := TaskTemplate{
+			ID:             102,
+			UserID:         testUser.UserID,
+			Title:          "Monthly Task",
+			RepeatType:     "interval",
+			RepeatUnit:     &repeatUnit,
+			RepeatInterval: &repeatInterval,
+			StartDate:      &start,
+			IsActive:       true,
+		}
+
+		templates := []TaskTemplate{template}
+		now := time.Now().Truncate(24 * time.Hour)
+		monthEnd := now.AddDate(0, 2, 0)
+
+		_, err := generateOcc(templates, testUser.UserID, now, monthEnd)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+
+		var count int64
+		database.DB.Model(&TaskOccurrence{}).Where("task_id = ?", template.ID).Count(&count)
+		if count == 0 {
+			t.Errorf("Expected monthly occurrences to be created")
+		}
+	})
 }
 
 func TestUpdateOccStatusHandler(t *testing.T) {
-	dt := time.Now().AddDate(0, 0, 1)
-	occ := TaskOccurrence{
-		TaskID:  1,
-		UserID:  testUser.UserID,
-		DueDate: dt,
-		Status:  "pending",
-	}
-	database.DB.Create(&occ)
-
-	action := TaskActionDTO{Action: "complete"}
-	body, _ := json.Marshal(action)
-	url := fmt.Sprintf("/tasks/occurrences/%d/status", occ.ID)
-	req := httptest.NewRequest("PATCH", url, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := testApp.Test(req)
-	if err != nil {
-		t.Fatalf("Failed to test app: %v", err)
+	createTask := func(title string) uint {
+		task := TaskTemplate{
+			UserID:     testUser.UserID,
+			Title:      title,
+			RepeatType: "once",
+		}
+		database.DB.Create(&task)
+		return task.ID
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", resp.StatusCode)
-	}
+	t.Run("Complete Action", func(t *testing.T) {
+		taskId := createTask("Complete Action Task")
+		dt := time.Now().AddDate(0, 0, 1)
+		occ := TaskOccurrence{
+			TaskID:  taskId,
+			UserID:  testUser.UserID,
+			DueDate: dt,
+			Status:  "pending",
+		}
+		database.DB.Create(&occ)
 
-	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
-	if result["status"] != "completed" {
-		t.Errorf("Expected status completed, got %v", result["status"])
-	}
+		action := TaskActionDTO{Action: "complete"}
+		body, _ := json.Marshal(action)
+		url := fmt.Sprintf("/tasks/occurrences/%d/status", occ.ID)
+		req := httptest.NewRequest("PATCH", url, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := testApp.Test(req)
+		if err != nil {
+			t.Fatalf("Failed to test app: %v", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		}
+
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+		if result["status"] != "completed" {
+			t.Errorf("Expected status completed, got %v", result["status"])
+		}
+	})
+
+	t.Run("Skip Action", func(t *testing.T) {
+		taskId := createTask("Skip Action Task")
+		dt := time.Now().AddDate(0, 0, 1)
+		occ := TaskOccurrence{
+			TaskID:  taskId,
+			UserID:  testUser.UserID,
+			DueDate: dt,
+			Status:  "pending",
+		}
+		database.DB.Create(&occ)
+
+		action := TaskActionDTO{Action: "skip"}
+		body, _ := json.Marshal(action)
+		url := fmt.Sprintf("/tasks/occurrences/%d/status", occ.ID)
+		req := httptest.NewRequest("PATCH", url, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, _ := testApp.Test(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		}
+
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+		if result["status"] != "skipped" {
+			t.Errorf("Expected status skipped, got %v", result["status"])
+		}
+	})
+
+	t.Run("Undo Action", func(t *testing.T) {
+		taskId := createTask("Undo Action Task")
+		dt := time.Now().AddDate(0, 0, 1)
+		occ := TaskOccurrence{
+			TaskID:  taskId,
+			UserID:  testUser.UserID,
+			DueDate: dt,
+			Status:  "completed",
+		}
+		database.DB.Create(&occ)
+
+		action := TaskActionDTO{Action: "undo"}
+		body, _ := json.Marshal(action)
+		url := fmt.Sprintf("/tasks/occurrences/%d/status", occ.ID)
+		req := httptest.NewRequest("PATCH", url, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, _ := testApp.Test(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		}
+
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+		if result["status"] != "pending" {
+			t.Errorf("Expected status pending, got %v", result["status"])
+		}
+	})
+
+	t.Run("Reschedule Action", func(t *testing.T) {
+		taskId := createTask("Reschedule Action Task")
+		dt := time.Now().AddDate(0, 0, 1)
+		occ := TaskOccurrence{
+			TaskID:  taskId,
+			UserID:  testUser.UserID,
+			DueDate: dt,
+			Status:  "pending",
+		}
+		database.DB.Create(&occ)
+
+		newDt := time.Now().AddDate(0, 0, 2)
+		action := TaskActionDTO{Action: "reschedule", NewDueDate: &newDt}
+		body, _ := json.Marshal(action)
+		url := fmt.Sprintf("/tasks/occurrences/%d/status", occ.ID)
+		req := httptest.NewRequest("PATCH", url, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, _ := testApp.Test(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		}
+
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+		if result["status"] != "pending" {
+			t.Errorf("Expected status pending, got %v", result["status"])
+		}
+
+		// Verify due date in DB
+		var updatedOcc TaskOccurrence
+		database.DB.First(&updatedOcc, occ.ID)
+
+		// Normalize newDt for comparison (strip time)
+		expected := newDt.Format("2006-01-02")
+		actual := updatedOcc.DueDate.Format("2006-01-02")
+		if actual != expected {
+			t.Errorf("Expected due date %v, got %v", expected, actual)
+		}
+	})
 }
 
 func TestUpdateTaskTemplateHandler(t *testing.T) {
 
 	template := TaskTemplate{
-		UserID: testUser.UserID,
-		Title:  "Original Title",
+		UserID:     testUser.UserID,
+		Title:      "Original Title",
+		RepeatType: "once",
 	}
 	database.DB.Create(&template)
 
@@ -295,8 +494,9 @@ func TestUpdateTaskTemplateHandler(t *testing.T) {
 
 func TestGetTemplateDetailHandler(t *testing.T) {
 	template := TaskTemplate{
-		UserID: testUser.UserID,
-		Title:  "Detail Test Task",
+		UserID:     testUser.UserID,
+		Title:      "Detail Test Task",
+		RepeatType: "once",
 	}
 	database.DB.Create(&template)
 
@@ -313,32 +513,90 @@ func TestGetTemplateDetailHandler(t *testing.T) {
 }
 
 func TestSetTaskTemplateStatusHandler(t *testing.T) {
+	t.Run("Deactivate Template", func(t *testing.T) {
+		dt := time.Now().AddDate(0, 0, 1)
+		template := TaskTemplate{
+			UserID:     testUser.UserID,
+			Title:      "Deactivate Side Effect Task",
+			IsActive:   true,
+			RepeatType: "once",
+			DueDate:    &dt,
+		}
+		database.DB.Create(&template)
 
-	template := TaskTemplate{
-		UserID:   testUser.UserID,
-		Title:    "Status Toggle Task",
-		IsActive: true,
-	}
-	database.DB.Create(&template)
+		// Create occurrence
+		occ := TaskOccurrence{TaskID: template.ID, UserID: testUser.UserID, DueDate: dt, Status: "pending"}
+		database.DB.Create(&occ)
 
-	isActive := false
-	statusReq := SetTemplateStatusDTO{IsActive: &isActive}
-	body, _ := json.Marshal(statusReq)
-	url := fmt.Sprintf("/tasks/templates/%d/status", template.ID)
-	req := httptest.NewRequest("PATCH", url, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
+		isActive := false
+		statusReq := SetTemplateStatusDTO{IsActive: &isActive}
+		body, _ := json.Marshal(statusReq)
+		url := fmt.Sprintf("/tasks/templates/%d/status", template.ID)
+		req := httptest.NewRequest("PATCH", url, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
 
-	resp, err := testApp.Test(req)
-	if err != nil {
-		t.Fatalf("Failed to test app: %v", err)
-	}
+		resp, _ := testApp.Test(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", resp.StatusCode)
-	}
+		// Verify occurrence is deleted
+		var count int64
+		database.DB.Model(&TaskOccurrence{}).Where("task_id = ?", template.ID).Count(&count)
+		if count != 0 {
+			t.Errorf("Expected occurrence to be deleted after deactivation")
+		}
+	})
+
+	t.Run("Reactivate Once Template", func(t *testing.T) {
+		dt := time.Now().AddDate(0, 0, 1)
+		template := TaskTemplate{
+			UserID:     testUser.UserID,
+			Title:      "Reactivate Side Effect Task",
+			IsActive:   false, // isActive default true
+			RepeatType: "once",
+			DueDate:    &dt,
+		}
+		database.DB.Create(&template)
+		database.DB.Model(&template).UpdateColumn("is_active", false)
+
+		isActive := true
+		statusReq := SetTemplateStatusDTO{IsActive: &isActive}
+		body, _ := json.Marshal(statusReq)
+		url := fmt.Sprintf("/tasks/templates/%d/status", template.ID)
+		req := httptest.NewRequest("PATCH", url, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, _ := testApp.Test(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		}
+
+		// Verify occurrence is recreated
+		var count int64
+		database.DB.Model(&TaskOccurrence{}).Where("task_id = ?", template.ID).Count(&count)
+		if count != 1 {
+			t.Errorf("Expected occurrence to be recreated after reactivation")
+		}
+	})
 }
 
 func TestGetTodayOccs(t *testing.T) {
+	// Setup: create one overdue and one today task
+	yesterday := time.Now().AddDate(0, 0, -1)
+	today := time.Now()
+
+	task1 := TaskTemplate{UserID: testUser.UserID, Title: "Overdue Task", RepeatType: "once", DueDate: &yesterday}
+	task2 := TaskTemplate{UserID: testUser.UserID, Title: "Today Task", RepeatType: "once", DueDate: &today}
+	database.DB.Create(&task1)
+	database.DB.Create(&task2)
+
+	// Create occurrences
+	occ1 := TaskOccurrence{TaskID: task1.ID, UserID: testUser.UserID, DueDate: yesterday, Status: "pending"}
+	occ2 := TaskOccurrence{TaskID: task2.ID, UserID: testUser.UserID, DueDate: today, Status: "pending"}
+	database.DB.Create(&occ1)
+	database.DB.Create(&occ2)
+
 	req := httptest.NewRequest("GET", "/tasks/today", nil)
 	resp, err := testApp.Test(req)
 	if err != nil {
@@ -348,17 +606,34 @@ func TestGetTodayOccs(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", resp.StatusCode)
 	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	todayList := result["today"].([]interface{})
+	overdueList := result["overdue"].([]interface{})
+
+	if len(todayList) == 0 {
+		t.Errorf("Expected at least one today task")
+	}
+	if len(overdueList) == 0 {
+		t.Errorf("Expected at least one overdue task")
+	}
+
+	counts := result["counts"].(map[string]interface{})
+	if counts["today"].(float64) < 1 {
+		t.Errorf("Expected today count >= 1")
+	}
 }
 
 func TestTaskCategoryAndEdgeCases(t *testing.T) {
 	t.Run("Invalid Category Payload", func(t *testing.T) {
 		dt := time.Now().AddDate(0, 0, 1)
 		taskReq := map[string]interface{}{
-			"title":           "Invalid Category Task",
-			"description":     "Should fail",
-			"category":        "unknown_category",
-			"isRepeatEnabled": false,
-			"dueDate":         dt,
+			"title":       "Invalid Category Task",
+			"description": "Should fail",
+			"category":    "unknown_category",
+			"dueDate":     dt,
 		}
 
 		body, _ := json.Marshal(taskReq)
@@ -380,10 +655,10 @@ func TestTaskCategoryAndEdgeCases(t *testing.T) {
 		for _, cat := range categories {
 			dt := time.Now().AddDate(0, 0, 1)
 			taskReq := TaskDTO{
-				Title:           fmt.Sprintf("Task with %s cat", cat),
-				Category:        cat,
-				IsRepeatEnabled: false,
-				DueDate:         &dt,
+				Title:      fmt.Sprintf("Task with %s cat", cat),
+				Category:   cat,
+				RepeatType: "once",
+				DueDate:    &dt,
 			}
 
 			body, _ := json.Marshal(taskReq)
@@ -404,10 +679,9 @@ func TestTaskCategoryAndEdgeCases(t *testing.T) {
 	t.Run("Empty Category", func(t *testing.T) {
 		dt := time.Now().AddDate(0, 0, 1)
 		taskReq := map[string]interface{}{
-			"title":           "Empty Category Task",
-			"category":        "",
-			"isRepeatEnabled": false,
-			"dueDate":         dt,
+			"title":    "Empty Category Task",
+			"category": "",
+			"dueDate":  dt,
 		}
 
 		body, _ := json.Marshal(taskReq)
@@ -428,18 +702,20 @@ func TestTaskCategoryAndEdgeCases(t *testing.T) {
 		// Create a task first
 		dt := time.Now().AddDate(0, 0, 1)
 		taskReq := TaskDTO{
-			Title:           "Category to Update",
-			Category:        "work",
-			IsRepeatEnabled: false,
-			DueDate:         &dt,
+			Title:      "Category to Update",
+			Category:   "work",
+			RepeatType: "once",
+			DueDate:    &dt,
 		}
 		body, _ := json.Marshal(taskReq)
 		req := httptest.NewRequest("POST", "/tasks/templates", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		resp, _ := testApp.Test(req)
-		
 		var createResult map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&createResult)
+		if createResult["taskId"] == nil {
+			t.Fatalf("Failed to create task, response: %v", createResult)
+		}
 		taskId := uint(createResult["taskId"].(float64))
 
 		// Update with null category
@@ -472,10 +748,10 @@ func TestTaskCategoryAndEdgeCases(t *testing.T) {
 		// Create task
 		dt := time.Now().AddDate(0, 0, 1)
 		taskReq := TaskDTO{
-			Title:           "Change Cat Task",
-			Category:        "work",
-			IsRepeatEnabled: false,
-			DueDate:         &dt,
+			Title:      "Change Cat Task",
+			Category:   "work",
+			RepeatType: "once",
+			DueDate:    &dt,
 		}
 		body, _ := json.Marshal(taskReq)
 		req := httptest.NewRequest("POST", "/tasks/templates", bytes.NewReader(body))
@@ -483,6 +759,9 @@ func TestTaskCategoryAndEdgeCases(t *testing.T) {
 		resp, _ := testApp.Test(req)
 		var createResult map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&createResult)
+		if createResult["taskId"] == nil {
+			t.Fatalf("Failed to create task, response: %v", createResult)
+		}
 		taskId := uint(createResult["taskId"].(float64))
 
 		// Update category
@@ -510,13 +789,14 @@ func TestTaskCategoryAndEdgeCases(t *testing.T) {
 	t.Run("Cleaning Category During Update", func(t *testing.T) {
 		// "Cleaning" here means setting it back to 'other' or trying empty string.
 		// Empty string should fail validation.
-		
+
 		dt := time.Now().AddDate(0, 0, 1)
 		task := TaskTemplate{
-			UserID:   testUser.UserID,
-			Title:    "Cleaning Test",
-			Category: "work",
-			DueDate:  &dt,
+			UserID:     testUser.UserID,
+			Title:      "Cleaning Test",
+			Category:   "work",
+			DueDate:    &dt,
+			RepeatType: "once",
 		}
 		database.DB.Create(&task)
 
@@ -529,7 +809,7 @@ func TestTaskCategoryAndEdgeCases(t *testing.T) {
 		req := httptest.NewRequest("PATCH", url, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		resp, _ := testApp.Test(req)
-		
+
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("Expected status 400 for empty category update, got %d", resp.StatusCode)
 		}
@@ -545,19 +825,176 @@ func TestTaskCategoryAndEdgeCases(t *testing.T) {
 
 		// Unauthorized (Accessing task of another user)
 		otherTask := TaskTemplate{
-			UserID:   testUser.UserID + 1, // Another user
-			Title:    "Hidden Task",
-			Category: "work",
+			UserID:     testUser.UserID + 1, // Another user
+			Title:      "Hidden Task",
+			Category:   "work",
+			RepeatType: "once",
 		}
 		database.DB.Create(&otherTask)
 
 		url := fmt.Sprintf("/tasks/templates/%d", otherTask.ID)
 		req = httptest.NewRequest("GET", url, nil)
 		resp, _ = testApp.Test(req)
-		
+
 		// The controller filters by uid from locals, so it won't find this task.
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("Expected status 404 for unauthorized access, got %d", resp.StatusCode)
+		}
+	})
+}
+func TestDashboardStatusAndCategory(t *testing.T) {
+	// Setup: Create a task with category and an occurrence with status
+	dt := time.Now()
+	task := TaskTemplate{
+		UserID:     testUser.UserID,
+		Title:      "Dashboard Detail Test",
+		Category:   "work",
+		DueDate:    &dt,
+		RepeatType: "once",
+	}
+	database.DB.Create(&task)
+
+	occ := TaskOccurrence{
+		TaskID:  task.ID,
+		UserID:  testUser.UserID,
+		DueDate: dt,
+		Status:  "pending",
+	}
+	database.DB.Create(&occ)
+
+	req := httptest.NewRequest("GET", "/dashboard", nil)
+	resp, _ := testApp.Test(req)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	// Since it's due today, check weekly or monthly lists depending on how DashboardHandler sorts
+	// But let's just check overdue/weekly/monthly for any occurrence with our taskId
+	found := false
+	for _, section := range []string{"overdue", "weekly", "monthly"} {
+		if list, ok := result[section].([]interface{}); ok {
+			for _, item := range list {
+				m := item.(map[string]interface{})
+				if uint(m["taskId"].(float64)) == task.ID {
+					found = true
+					if m["status"] != "pending" {
+						t.Errorf("Expected status pending, got %v", m["status"])
+					}
+					// Wait, DashboardOccurrenceDTO has Category field
+					// Let's check if it's populated.
+					// Note: DashboardHandler needs to populate Category from task template.
+					if m["category"] != "work" {
+						t.Errorf("Expected category work, got %v", m["category"])
+					}
+				}
+			}
+		}
+	}
+	if !found {
+		t.Logf("Result: %v", result)
+		t.Errorf("Could not find created task in dashboard response")
+	}
+}
+
+func TestUpdateTemplateSideEffects(t *testing.T) {
+	t.Run("Schedule Change Deletes Future Occurrences", func(t *testing.T) {
+		repeatUnit := "day"
+		interval := 1
+		start := time.Now().AddDate(0, 0, -1)
+		template := TaskTemplate{
+			UserID:         testUser.UserID,
+			Title:          "Side Effect Test",
+			RepeatType:     "interval",
+			RepeatUnit:     &repeatUnit,
+			RepeatInterval: &interval,
+			StartDate:      &start,
+		}
+		database.DB.Create(&template)
+
+		// Create a future occurrence
+		futureDt := time.Now().AddDate(0, 0, 5)
+		occ := TaskOccurrence{
+			TaskID:  template.ID,
+			UserID:  testUser.UserID,
+			DueDate: futureDt,
+			Status:  "pending",
+		}
+		database.DB.Create(&occ)
+
+		// Update repeat interval
+		newInterval := 2
+		updateReq := UpdateTemplateDTO{
+			RepeatInterval: &newInterval,
+		}
+		body, _ := json.Marshal(updateReq)
+		url := fmt.Sprintf("/tasks/templates/%d", template.ID)
+		req := httptest.NewRequest("PATCH", url, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, _ := testApp.Test(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		}
+
+		// Verify occurrence is deleted
+		var count int64
+		database.DB.Model(&TaskOccurrence{}).Where("id = ?", occ.ID).Count(&count)
+		if count != 0 {
+			t.Errorf("Expected future occurrence to be deleted, but it still exists")
+		}
+	})
+
+	t.Run("Once Task Recreates Occurrence on DueDate Change", func(t *testing.T) {
+		dt := time.Now().AddDate(0, 0, 1)
+		template := TaskTemplate{
+			UserID:     testUser.UserID,
+			Title:      "Once Side Effect Test",
+			RepeatType: "once",
+			DueDate:    &dt,
+		}
+		database.DB.Create(&template)
+
+		occ := TaskOccurrence{
+			TaskID:  template.ID,
+			UserID:  testUser.UserID,
+			DueDate: dt,
+			Status:  "pending",
+		}
+		database.DB.Create(&occ)
+
+		// Update due date
+		newDt := time.Now().AddDate(0, 0, 2)
+		updateReq := UpdateTemplateDTO{
+			DueDate: &newDt,
+		}
+		body, _ := json.Marshal(updateReq)
+		url := fmt.Sprintf("/tasks/templates/%d", template.ID)
+		req := httptest.NewRequest("PATCH", url, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, _ := testApp.Test(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		}
+
+		// Verify old occurrence is deleted and new one is created
+		var count int64
+		database.DB.Model(&TaskOccurrence{}).Where("task_id = ?", template.ID).Count(&count)
+		if count != 1 {
+			t.Errorf("Expected exactly 1 occurrence, got %d", count)
+		}
+
+		var newOcc TaskOccurrence
+		database.DB.Where("task_id = ?", template.ID).First(&newOcc)
+
+		expected := newDt.Format("2006-01-02")
+		actual := newOcc.DueDate.Format("2006-01-02")
+		if actual != expected {
+			t.Errorf("Expected new due date %v, got %v", expected, actual)
 		}
 	})
 }

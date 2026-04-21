@@ -16,21 +16,27 @@ const (
 )
 
 type TaskTemplate struct {
-	ID              uint         `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID          uint         `gorm:"not null;index" json:"userId"`
-	Title           string       `gorm:"size:120;not null" json:"title"`
-	Description     string       `gorm:"size:255" json:"description,omitempty"`
-	IsRepeatEnabled bool         `gorm:"not null;default:false" json:"isRepeatEnabled"`
-	IsActive        bool         `gorm:"not null;default:true;index" json:"isActive"`
-	Category        CategoryType `gorm:"type:varchar(20);column:category;default:'other';not null;check:category IN ('work', 'personal', 'health', 'finance', 'learning', 'home', 'social', 'other')" json:"category"`
+	ID          uint   `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID      uint   `gorm:"not null;index" json:"userId"`
+	Title       string `gorm:"size:120;not null" json:"title"`
+	Description string `gorm:"size:255" json:"description,omitempty"`
 
-	// if IsRepeatEnabled false
+	//IsRepeatEnabled bool   `gorm:"not null;default:false" json:"isRepeatEnabled"`
+	RepeatType string `gorm:"not null" json:"repeatType"` // once / weekly / interval
+
+	IsActive bool         `gorm:"not null;default:true;index" json:"isActive"`
+	Category CategoryType `gorm:"type:varchar(20);column:category;default:'other';not null;check:category IN ('work', 'personal', 'health', 'finance', 'learning', 'home', 'social', 'other')" json:"category"`
+
+	// if RepeatType once
 	DueDate *time.Time `gorm:"type:date" json:"dueDate,omitempty"`
 
-	// if IsRepeatEnabled true
+	// if RepeatType interval
 	RepeatUnit     *string    `gorm:"size:10" json:"repeatUnit,omitempty"` // day | week | month
 	RepeatInterval *int       `gorm:"check:repeat_interval > 0" json:"repeatInterval,omitempty"`
 	StartDate      *time.Time `gorm:"type:date" json:"startDate,omitempty"`
+
+	// if RepeatType weekly
+	WeekDays *string `gorm:"size:20" json:"weekDays,omitempty"` // "1,3,6"
 
 	CreatedAt time.Time `json:"createdAt"` // TODO auto inc.
 	UpdatedAt time.Time `json:"updatedAt"` // TODO auto inc.
@@ -52,15 +58,18 @@ type TaskDTO struct {
 	Description string `json:"description" validate:"omitempty,max=500"`
 	Category    string `json:"category" validate:"oneof=work personal health finance learning home social other"`
 
-	IsRepeatEnabled bool `json:"isRepeatEnabled"`
+	RepeatType string `json:"repeatType" validate:"omitempty,oneof=once weekly interval"`
 
-	// One-time
+	// once
 	DueDate *time.Time `json:"dueDate" validate:"omitempty"`
 
-	// Recurring
+	// interval
 	RepeatUnit     *string    `json:"repeatUnit" validate:"omitempty,oneof=day week month"`
 	RepeatInterval *int       `json:"repeatInterval" validate:"omitempty,min=1"`
 	StartDate      *time.Time `json:"startDate" validate:"omitempty"`
+
+	//weekly
+	WeekDays *string `json:"weekDay" validate:"omitempty"`
 }
 
 type TaskActionDTO struct {
@@ -73,10 +82,8 @@ type UpdateTemplateDTO struct {
 	Description *string `json:"description,omitempty" validate:"omitempty,max=255"`
 	Category    *string `json:"category,omitempty" validate:"omitempty,oneof=work personal health finance learning home social other"`
 
-	// Eğer gönderilirse geçerli bir tarih olmalı
 	DueDate *time.Time `json:"dueDate,omitempty" validate:"omitempty"`
 
-	// Tekrar ayarları gönderilirse kurallara uymalı
 	RepeatUnit     *string    `json:"repeatUnit,omitempty" validate:"omitempty,oneof=day week month"`
 	RepeatInterval *int       `json:"repeatInterval,omitempty" validate:"omitempty,gt=0"`
 	StartDate      *time.Time `json:"startDate,omitempty" validate:"omitempty"`
