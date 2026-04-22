@@ -92,6 +92,8 @@ func main() {
 	protected.Get("/dashboard", task.DashboardHandler)
 	protected.Get("/tasks/today", task.GetTodayOccs)
 
+	protected.Get("/test/report", task.WeeklyReportHandler)
+
 	protected.Patch("/tasks/occurrences/:id/status", task.UpdateOccStatusHandler)
 	middleware.Log.Info("Starting server on :" + port)
 

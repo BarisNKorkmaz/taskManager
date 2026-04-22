@@ -3,6 +3,7 @@ package task
 import (
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -100,7 +101,6 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 		task.RepeatUnit = data.RepeatUnit
 		task.RepeatInterval = data.RepeatInterval
 		task.StartDate = data.StartDate
-		break
 
 	case "once":
 		task.RepeatType = data.RepeatType
@@ -117,7 +117,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 			})
 		}
 		task.DueDate = dueDate
-		break
+
 	case "weekly":
 		task.RepeatType = data.RepeatType
 		if data.WeekDays == nil || *data.WeekDays == "" {
@@ -150,7 +150,6 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 
 		task.StartDate = getLocalDate(*user)
 		task.WeekDays = data.WeekDays
-		break
 
 	default:
 		return c.Status(400).JSON(fiber.Map{
@@ -897,14 +896,7 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd
 			//debug zone
 			fmt.Printf("rawWeekDays: %s, Selected Days: %v", *template.WeekDays, selectedDays)
 
-			weekDay := int(now.Weekday())
-
-			if weekDay == 0 {
-				weekDay = 7
-			}
-
-			currentWeekStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
-				AddDate(0, 0, -(weekDay - 1))
+			currentWeekStart, _ := FindWeekStartAndEndDay(now)
 			limit := now.AddDate(0, 0, 31)
 			for i := currentWeekStart; i.Before(limit); i = i.AddDate(0, 0, 1) {
 				dueDate := i
@@ -971,13 +963,10 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd
 					dueDate = dueDate.AddDate(0, *template.RepeatInterval, 0)
 				}
 
-			default:
-				break
 			}
 
 		default:
 			middleware.Log.Error("Unexpected repeatType", "templateId", template.ID, "userId", uid, "repeatType", template.RepeatType)
-			break
 		}
 
 	}
@@ -1130,4 +1119,143 @@ func NormalizeToUserDate(t time.Time, userTimezone string) (*time.Time, error) {
 	)
 
 	return &normalized, nil
+}
+
+func WeeklyReportHandler(c fiber.Ctx) error {
+
+	uid := c.Locals("userId").(uint)
+	user := new(auth.User)
+
+	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   tx.Error.Error(),
+		})
+	}
+
+	now := getLocalDate(*user)
+	weekStartDay, weekEndDay := FindWeekStartAndEndDay(*now)
+
+	var occurrences []TaskOccurrence
+	var overdueOccurrences []TaskOccurrence
+	var completedOnTime []map[string]any
+	var completedLate []map[string]any
+	var skipped []map[string]any
+	var overdue []map[string]any
+
+	if tx := database.FetchWeeklyOccurrences(uid, &TaskOccurrence{}, weekStartDay, weekEndDay, &occurrences); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"Message": "Server error",
+			"error":   tx.Error,
+		})
+	}
+
+	if tx := database.FetchOverdueOccurrences(uid, &TaskOccurrence{}, weekEndDay, &overdueOccurrences); tx.Error != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"Message": "Server error",
+			"error":   tx.Error,
+		})
+	}
+
+	templatesTitle := make(map[uint]string)
+	score := 0
+	for _, occ := range occurrences {
+		if templatesTitle[occ.TaskID] == "" {
+			template := new(TaskTemplate)
+			if tx := database.FetchTaskTemplateById(&TaskTemplate{}, occ.TaskID, uid, template); tx.Error != nil {
+				return c.Status(500).JSON(fiber.Map{
+					"message": "Server error",
+					"error":   tx.Error.Error(),
+				})
+			}
+			templatesTitle[occ.TaskID] = template.Title
+		}
+
+		switch strings.ToLower(occ.Status) {
+		case "completed":
+
+			if occ.CompletedAt.After(occ.DueDate) {
+				score += 4
+				completedLate = append(completedLate, map[string]any{
+					"title":    templatesTitle[occ.TaskID],
+					"due":      occ.DueDate.Weekday().String(),
+					"actual":   occ.CompletedAt.Weekday().String(),
+					"daysDiff": fmt.Sprintf("%v days", math.Round(occ.CompletedAt.Sub(occ.DueDate).Hours()/24)),
+				})
+			} else {
+				score += 10
+				completedOnTime = append(completedOnTime, map[string]any{
+					"title": templatesTitle[occ.TaskID],
+					"date":  occ.CompletedAt.Format("02-01-2006"),
+				})
+			}
+
+		case "skipped":
+			skipped = append(skipped, map[string]any{
+				"title": templatesTitle[occ.TaskID],
+			})
+
+		case "pending":
+
+		}
+
+	}
+
+	for _, occ := range overdueOccurrences {
+		if templatesTitle[occ.TaskID] == "" {
+			template := new(TaskTemplate)
+			if tx := database.FetchTaskTemplateById(&TaskTemplate{}, occ.TaskID, uid, template); tx.Error != nil {
+				return c.Status(500).JSON(fiber.Map{
+					"message": "Server error",
+					"error":   tx.Error.Error(),
+				})
+			}
+			templatesTitle[occ.TaskID] = template.Title
+		}
+
+		score -= 5
+		overdue = append(overdue, map[string]any{
+			"title":      templatesTitle[occ.TaskID],
+			"dueDate":    occ.DueDate.Format("02-01-2006"),
+			"waitingFor": fmt.Sprintf("%v days", math.Round(now.Sub(occ.DueDate).Hours()/24)),
+		})
+	}
+
+	totalPossible := float64(len(occurrences) * 10)
+	finalScore := 0
+	if totalPossible > 0 {
+		finalScore = max(int((float64(score)/totalPossible)*100), 0)
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"period": fmt.Sprintf("%s - %s", weekStartDay.Format("02-01-2006"), weekEndDay.Format("02-01-2006")),
+		"stats": map[string]int{
+			"total_count":     len(occurrences),
+			"completedOnTime": len(completedOnTime),
+			"completedLate":   len(completedLate),
+			"overduePending":  len(overdue),
+			"skipped":         len(skipped),
+			"score":           finalScore,
+		},
+		"details": map[string][]map[string]any{
+			"completed_on_time": completedOnTime,
+			"completedLate":     completedLate,
+			"overduePending":    overdue,
+			"skipped":           skipped,
+		},
+	})
+
+}
+
+func FindWeekStartAndEndDay(now time.Time) (weekStartDay time.Time, weekEndDay time.Time) {
+	weekDay := int(now.Weekday())
+
+	if weekDay == 0 {
+		weekDay = 7
+	}
+
+	weekStartDay = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -(weekDay - 1))
+	weekEndDay = weekStartDay.AddDate(0, 0, 6)
+
+	return
 }

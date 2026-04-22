@@ -111,3 +111,11 @@ func DeactivateDeviceToken(database *gorm.DB, token string, userId uint, model a
 func FetchDeviceTokenByUserId(userId uint, model any, dest any) *gorm.DB {
 	return DB.Model(model).Where("user_id = ? AND is_active = ?", userId, true).First(dest)
 }
+
+func FetchWeeklyOccurrences(userId uint, model any, weekStart time.Time, weekEnd time.Time, dest any) *gorm.DB {
+	return DB.Model(model).Where("user_id = ? AND due_date >= ? AND due_date <= ?", userId, weekStart, weekEnd).Find(dest)
+}
+
+func FetchOverdueOccurrences(userId uint, model any, weekEnd time.Time, dest any) *gorm.DB {
+	return DB.Model(model).Where("user_id = ? AND status = ? AND due_date <= ?", userId, "pending", weekEnd).Find(dest)
+}

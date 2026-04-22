@@ -101,6 +101,7 @@ func setupTestApp() *fiber.App {
 	app.Get("/dashboard", DashboardHandler)
 	app.Get("/tasks/today", GetTodayOccs)
 	app.Patch("/tasks/occurrences/:id/status", UpdateOccStatusHandler)
+	app.Get("/tasks/weekly-report", WeeklyReportHandler)
 
 	return app
 }
@@ -997,4 +998,110 @@ func TestUpdateTemplateSideEffects(t *testing.T) {
 			t.Errorf("Expected new due date %v, got %v", expected, actual)
 		}
 	})
+}
+
+func TestWeeklyReportHandler(t *testing.T) {
+	// Cleanup from previous tests
+	database.DB.Unscoped().Where("user_id = ?", testUser.UserID).Delete(&TaskOccurrence{})
+	database.DB.Unscoped().Where("user_id = ?", testUser.UserID).Delete(&TaskTemplate{})
+
+	// 1. Setup User and Dates
+	now := time.Now()
+	weekStart, _ := FindWeekStartAndEndDay(now)
+
+	// Helper to get *time.Time
+	toPtr := func(t time.Time) *time.Time { return &t }
+
+	// 2. Create Task Template
+	template := TaskTemplate{
+		UserID:     testUser.UserID,
+		Title:      "Report Test Task",
+		RepeatType: "once",
+	}
+	database.DB.Create(&template)
+
+	// 3. Create Occurrences for different scenarios
+	// Completed On Time
+	occOnTime := TaskOccurrence{
+		TaskID:      template.ID,
+		UserID:      testUser.UserID,
+		DueDate:     weekStart.AddDate(0, 0, 1),
+		Status:      "completed",
+		CompletedAt: toPtr(weekStart.AddDate(0, 0, 1)),
+	}
+	// Completed Late
+	occLate := TaskOccurrence{
+		TaskID:      template.ID,
+		UserID:      testUser.UserID,
+		DueDate:     weekStart.AddDate(0, 0, 2),
+		Status:      "completed",
+		CompletedAt: toPtr(weekStart.AddDate(0, 0, 4)),
+	}
+	// Skipped
+	occSkipped := TaskOccurrence{
+		TaskID:  template.ID,
+		UserID:  testUser.UserID,
+		DueDate: weekStart.AddDate(0, 0, 5),
+		Status:  "skipped",
+	}
+	// Overdue (Pending and due before weekEnd)
+	occOverdue := TaskOccurrence{
+		TaskID:  template.ID,
+		UserID:  testUser.UserID,
+		DueDate: weekStart.AddDate(0, 0, -1),
+		Status:  "pending",
+	}
+
+	database.DB.Create(&occOnTime)
+	database.DB.Create(&occLate)
+	database.DB.Create(&occSkipped)
+	database.DB.Create(&occOverdue)
+
+	// 4. Request
+	req := httptest.NewRequest("GET", "/tasks/weekly-report", nil)
+	resp, err := testApp.Test(req)
+	if err != nil {
+		t.Fatalf("Failed to test app: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Logf("Response body: %s", string(respBody))
+		return
+	}
+
+	// 5. Verify Response
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	stats := result["stats"].(map[string]interface{})
+	if stats["total_count"].(float64) < 3 { // occOnTime, occLate, occSkipped are in week range
+		t.Errorf("Expected at least 3 total occurrences in week range, got %v", stats["total_count"])
+	}
+
+	if stats["completedOnTime"].(float64) != 1 {
+		t.Errorf("Expected 1 completed on time, got %v", stats["completedOnTime"])
+	}
+
+	if stats["completedLate"].(float64) != 1 {
+		t.Errorf("Expected 1 completed late, got %v", stats["completedLate"])
+	}
+
+	if stats["skipped"].(float64) != 1 {
+		t.Errorf("Expected 1 skipped, got %v", stats["skipped"])
+	}
+
+	if stats["overduePending"].(float64) < 1 {
+		t.Errorf("Expected at least 1 overdue pending, got %v", stats["overduePending"])
+	}
+
+	score := stats["score"].(float64)
+	if score <= 0 {
+		t.Errorf("Expected a positive score, got %v", score)
+	}
+
+	t.Logf("Weekly Report Score: %v", score)
 }

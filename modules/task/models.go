@@ -102,3 +102,33 @@ type DashboardOccurrenceDTO struct {
 	DueDate     time.Time    `json:"dueDate"`
 	Status      string       `json:"status"`
 }
+
+type ReportOccurrenceCompletedDTO struct {
+	ID          uint         `json:"id"`
+	TaskID      uint         `json:"taskId"`
+	Title       string       `json:"title"`
+	Description string       `json:"description"`
+	Category    CategoryType `json:"category"`
+	DueDate     time.Time    `json:"dueDate"`
+	CompletedAt time.Time    `json:"completedAt"`
+}
+
+type ReportOccurrenceLateCompletedDTO struct {
+	ID          uint         `json:"id"`
+	TaskID      uint         `json:"taskId"`
+	Title       string       `json:"title"`
+	Description string       `json:"description"`
+	Category    CategoryType `json:"category"`
+	DueDate     time.Time    `json:"dueDate"`
+	CompletedAt time.Time    `json:"completedAt"`
+	Delay       int          `json:"delay"`
+}
+
+type ReportOccurrenceSkippedDTO struct {
+	ID          uint         `json:"id"`
+	TaskID      uint         `json:"taskId"`
+	Title       string       `json:"title"`
+	Description string       `json:"description"`
+	Category    CategoryType `json:"category"`
+	DueDate     time.Time    `json:"dueDate"`
+}
