@@ -53,6 +53,29 @@ func SendDailyTaskReminderPushes() (fatalErr error, errors []error) {
 	return
 }
 
+func SendWeeklyReportNotification() (errors []error) {
+	var tokens []DeviceToken
+
+	if tx := database.FetchActiveDeviceTokens(&DeviceToken{}, &tokens); tx.Error != nil {
+		middleware.Log.Error("failed fetch active device tokens", "err", tx.Error.Error())
+		errors = append(errors, tx.Error)
+		return
+	}
+
+	for _, token := range tokens {
+		if _, err := SendPushToToken(token.Token, token.UserID, "Your Weekly Report is Ready!", "See how you performed this week"); err != nil {
+			errors = append(errors, err)
+			continue
+		}
+	}
+
+	if len(errors) == 0 {
+		errors = nil
+	}
+
+	return errors
+}
+
 func StartScheduler() {
 	location := time.Now().Location()
 
@@ -71,6 +94,18 @@ func StartScheduler() {
 
 		middleware.Log.Info("CRON completed")
 
+	})
+
+	if err != nil {
+		middleware.Log.Error("CRON add function error", "err", err)
+		return
+	}
+
+	_, err = c.AddFunc("0 1 * * 1", func() {
+		middleware.Log.Info("CRON weekly report func is starting..")
+		if errs := SendWeeklyReportNotification(); errs != nil {
+			middleware.Log.Error("CRON weekly push notifications errors", "errs", errs)
+		}
 	})
 
 	if err != nil {
