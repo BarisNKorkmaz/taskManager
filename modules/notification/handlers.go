@@ -136,7 +136,7 @@ func TestPushHandler(c fiber.Ctx) error {
 		})
 	}
 
-	id, err := SendPushToToken(deviceToken.Token, "7Planner Test", "Push is working!!!")
+	id, err := SendPushToToken(deviceToken.Token, uid, "7Planner Test", "Push is working!!!")
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

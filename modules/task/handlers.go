@@ -863,7 +863,7 @@ func GetTemplateDetailHandler(c fiber.Ctx) error {
 
 }
 
-func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd time.Time) (map[uint]TaskTemplate, error) {
+func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, LimitTime time.Time) (map[uint]TaskTemplate, error) {
 	type OccKey struct {
 		TaskID  uint
 		DueDate time.Time
@@ -872,7 +872,6 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd
 	taskTemplatesMap := make(map[uint]TaskTemplate)
 
 	var wantedOccurrence []OccKey
-	fmt.Println(taskTemplates)
 	for _, template := range taskTemplates {
 
 		taskTemplatesMap[template.ID] = template
@@ -893,12 +892,9 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd
 				dayInt, _ := strconv.Atoi(dayStr)
 				selectedDays[time.Weekday(dayInt)] = true
 			}
-			//debug zone
-			fmt.Printf("rawWeekDays: %s, Selected Days: %v", *template.WeekDays, selectedDays)
 
 			currentWeekStart, _ := FindWeekStartAndEndDay(now)
-			limit := now.AddDate(0, 0, 31)
-			for i := currentWeekStart; i.Before(limit); i = i.AddDate(0, 0, 1) {
+			for i := currentWeekStart; i.Before(LimitTime); i = i.AddDate(0, 0, 1) {
 				dueDate := i
 
 				if dueDate.Before(now) {
@@ -925,7 +921,7 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd
 					dueDate = dueDate.AddDate(0, 0, *template.RepeatInterval)
 				}
 
-				for !dueDate.After(monthEnd) {
+				for !dueDate.After(LimitTime) {
 					wantedOccurrence = append(wantedOccurrence, OccKey{
 						TaskID:  template.ID,
 						DueDate: dueDate,
@@ -940,7 +936,7 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd
 					dueDate = dueDate.AddDate(0, 0, 7*(*template.RepeatInterval))
 				}
 
-				for !dueDate.After(monthEnd) {
+				for !dueDate.After(LimitTime) {
 					wantedOccurrence = append(wantedOccurrence, OccKey{
 						TaskID:  template.ID,
 						DueDate: dueDate,
@@ -955,7 +951,7 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd
 					dueDate = dueDate.AddDate(0, *template.RepeatInterval, 0)
 				}
 
-				for !dueDate.After(monthEnd) {
+				for !dueDate.After(LimitTime) {
 					wantedOccurrence = append(wantedOccurrence, OccKey{
 						TaskID:  template.ID,
 						DueDate: dueDate,
@@ -972,7 +968,7 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, monthEnd
 	}
 
 	var existingOccurence []OccKey
-	if tx := database.FetchOccurenceByUID(uid, &TaskOccurrence{}, &existingOccurence, now, monthEnd); tx.Error != nil {
+	if tx := database.FetchOccurenceByUID(uid, &TaskOccurrence{}, &existingOccurence, now, LimitTime); tx.Error != nil {
 		fmt.Println("FetchOccurenceByUID error")
 		return nil, tx.Error
 	}
@@ -1258,4 +1254,27 @@ func FindWeekStartAndEndDay(now time.Time) (weekStartDay time.Time, weekEndDay t
 	weekEndDay = weekStartDay.AddDate(0, 0, 6)
 
 	return
+}
+
+func GenerateDailyOccs(userId uint) (int, error) {
+	var taskTemplates []TaskTemplate
+
+	if tx := database.FetchTaskTemplates(&TaskTemplate{}, userId, &taskTemplates); tx.Error != nil {
+		return 0, tx.Error
+	}
+
+	now := time.Now()
+	now = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrow := now.AddDate(0, 0, 1)
+
+	templateMap, err := generateOcc(taskTemplates, userId, now, tomorrow)
+
+	if err != nil {
+		return 0, err
+	}
+
+	count := len(templateMap)
+
+	return count, nil
+
 }

@@ -11,13 +11,26 @@ import (
 
 	"github.com/BarisNKorkmaz/taskManager/database"
 	"github.com/BarisNKorkmaz/taskManager/middleware"
-	"github.com/BarisNKorkmaz/taskManager/modules/notification"
 	"github.com/BarisNKorkmaz/taskManager/utils"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v3"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
+
+type deviceTokenInterface struct {
+	ID         uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID     uint      `gorm:"not null;index" json:"userId"`
+	SessionID  string    `gorm:"not null;index" json:"sessionId"`
+	Token      string    `gorm:"not null;uniqueIndex" json:"token"`
+	Platform   string    `gorm:"not null;size:20" json:"platform"` // ios, android
+	DeviceID   *string   `gorm:"size:191;index" json:"deviceId,omitempty"`
+	AppVersion *string   `gorm:"size:50" json:"appVersion,omitempty"`
+	IsActive   bool      `gorm:"not null;default:true;index" json:"isActive"`
+	LastSeenAt time.Time `gorm:"not null;index" json:"lastSeenAt"`
+	CreatedAt  time.Time `gorm:"not null" json:"createdAt"`
+	UpdatedAt  time.Time `gorm:"not null" json:"updatedAt"`
+}
 
 func RegisterHandler(c fiber.Ctx) error {
 	data := new(RegisterDTO)
@@ -249,7 +262,7 @@ func LogoutHandler(c fiber.Ctx) error {
 		})
 	}
 
-	if tx := database.DeactivateDeviceTokenBySessionId(sessionId, &notification.DeviceToken{}); tx.Error != nil {
+	if tx := database.DeactivateDeviceTokenBySessionId(sessionId, &deviceTokenInterface{}); tx.Error != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),

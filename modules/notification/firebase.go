@@ -6,6 +6,7 @@ import (
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
+	"github.com/BarisNKorkmaz/taskManager/database"
 	"google.golang.org/api/option"
 )
 
@@ -30,7 +31,7 @@ func InitFirebase(path string) error {
 	return nil
 }
 
-func SendPushToToken(token string, title string, body string) (string, error) {
+func SendPushToToken(token string, userId uint, title string, body string) (string, error) {
 
 	if MessagingClient == nil || token == "" {
 		return "", errors.New("messaging client not initialized or token is empty")
@@ -45,6 +46,9 @@ func SendPushToToken(token string, title string, body string) (string, error) {
 
 	id, err := MessagingClient.Send(context.Background(), &message)
 	if err != nil {
+		if messaging.IsUnregistered(err) {
+			database.DeactivateDeviceToken(database.DB, token, 3, &DeviceToken{})
+		}
 		return "", err
 	}
 

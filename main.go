@@ -67,7 +67,7 @@ func main() {
 	app.Use(recoverer.New())
 	app.Use(logger.New())
 	app.Get("/health", database.HealthHandler)
-
+	notification.StartScheduler()
 	authGroup := app.Group("/auth")
 	authGroup.Post("/register", auth.RegisterHandler)
 	authGroup.Post("/login", auth.EmailRateLimiter(), auth.LoginIPRateLimiter(), auth.LoginHandler)

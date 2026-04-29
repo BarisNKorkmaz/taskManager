@@ -38,8 +38,8 @@ type TaskTemplate struct {
 	// if RepeatType weekly
 	WeekDays *string `gorm:"size:20" json:"weekDays,omitempty"` // "1,3,6"
 
-	CreatedAt time.Time `json:"createdAt"` // TODO auto inc.
-	UpdatedAt time.Time `json:"updatedAt"` // TODO auto inc.
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type TaskOccurrence struct {
@@ -49,8 +49,8 @@ type TaskOccurrence struct {
 	DueDate     time.Time  `gorm:"not null;type:date;uniqueIndex:ux_task_due;index:idx_occ_user_due;index:idx_occ_user_status_due" json:"dueDate"`
 	Status      string     `gorm:"type:varchar(20);not null;default:'pending';index:idx_occ_user_status_due" json:"status"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"` // TODO auto inc.
-	UpdatedAt   time.Time  `json:"updatedAt"` // TODO auto inc.
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
 type TaskDTO struct {

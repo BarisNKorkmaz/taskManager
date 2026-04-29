@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func Create(database *gorm.DB, value any, model any) *gorm.DB {
@@ -35,7 +36,10 @@ func FetchUncompletedOccurrences(userId uint, model any, dest any, finalDate tim
 }
 
 func CreateOccurrencesBatch(database *gorm.DB, occs any, model any, batchSize int) *gorm.DB {
-	return database.Model(model).CreateInBatches(occs, batchSize)
+	return database.Model(model).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "task_id"}, {Name: "due_date"}},
+		DoNothing: true,
+	}).CreateInBatches(occs, batchSize)
 }
 
 func FetchOccurenceByOccId(model any, occId any, userId uint, dest any) *gorm.DB {
@@ -118,4 +122,8 @@ func FetchWeeklyOccurrences(userId uint, model any, weekStart time.Time, weekEnd
 
 func FetchOverdueOccurrences(userId uint, model any, weekEnd time.Time, dest any) *gorm.DB {
 	return DB.Model(model).Where("user_id = ? AND status = ? AND due_date <= ?", userId, "pending", weekEnd).Find(dest)
+}
+
+func FetchActiveDeviceTokens(model any, dest any) *gorm.DB {
+	return DB.Model(model).Where("is_active = ?", true).Find(dest)
 }
