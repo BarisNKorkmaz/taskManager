@@ -24,6 +24,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 	data := new(TaskDTO)
 
 	if err := c.Bind().Body(data); err != nil {
+		middleware.Log.Info("Body parsing error in create tesk template handler", "err", err.Error())
 		return c.Status(400).JSON(fiber.Map{
 			"message": "Bad request",
 			"error":   err.Error(),
@@ -55,6 +56,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 	user := &auth.User{}
 
 	if tx := database.FetchUserByUID(userID, user); tx.Error != nil {
+		middleware.Log.Error("error on fetch user with userId", "err", tx.Error.Error(), "userId", userID)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -160,6 +162,8 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 
 	atomicDB := database.DB.Begin()
 	if atomicDB.Error != nil {
+		middleware.Log.Error("error on starting atomic transaction in create task template handler", "err", atomicDB.Error.Error())
+
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   atomicDB.Error.Error(),
@@ -168,6 +172,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 
 	if tx := database.Create(atomicDB, task, &TaskTemplate{}); tx.Error != nil {
 		atomicDB.Rollback()
+		middleware.Log.Error("error on create task template in create task template handler", "err", tx.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -185,6 +190,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 
 		if tx := database.Create(atomicDB, &occ, &TaskOccurrence{}); tx.Error != nil {
 			atomicDB.Rollback()
+			middleware.Log.Error("error on create occ in create task template handler", "err", tx.Error.Error())
 			return c.Status(500).JSON(fiber.Map{
 				"message": "Server error",
 				"error":   tx.Error.Error(),
@@ -194,6 +200,7 @@ func CreateTaskTemplateHandler(c fiber.Ctx) error {
 
 	if res := atomicDB.Commit(); res.Error != nil {
 		atomicDB.Rollback()
+		middleware.Log.Error("error on commiting atomic transaction in create task template handler", "err", res.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   res.Error.Error(),
@@ -213,6 +220,7 @@ func DashboardHandler(c fiber.Ctx) error {
 	uid := c.Locals("userId").(uint)
 
 	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		middleware.Log.Error("error on fetch user with userId", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -226,6 +234,7 @@ func DashboardHandler(c fiber.Ctx) error {
 	var taskTemplates []TaskTemplate
 
 	if tx := database.FetchTasksByUID(uid, &TaskTemplate{}, &taskTemplates); tx.Error != nil {
+		middleware.Log.Error("error on fetch tasks with userId", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -235,6 +244,7 @@ func DashboardHandler(c fiber.Ctx) error {
 	taskTemplatesMap, generateErr := generateOcc(taskTemplates, uid, *now, monthEnd)
 
 	if generateErr != nil {
+		middleware.Log.Error("error on generate occs in dashboard handler", "err", generateErr.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   generateErr.Error(),
@@ -244,6 +254,7 @@ func DashboardHandler(c fiber.Ctx) error {
 	var uncompletedOcc []TaskOccurrence
 
 	if tx := database.FetchUncompletedOccurrences(uid, &TaskOccurrence{}, &uncompletedOcc, monthEnd); tx.Error != nil {
+		middleware.Log.Error("error on fetch uncompleted occs with uid", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -309,6 +320,7 @@ func DashboardHandler(c fiber.Ctx) error {
 func getLocalDate(user auth.User) *time.Time {
 
 	if loc, err := time.LoadLocation(user.Timezone); err != nil {
+		middleware.Log.Warn("error on load location from user timezone", "err", err, "userId", user.UserID)
 		loc = time.UTC
 		now := time.Now().In(loc)
 		year, month, day := now.Date()
@@ -337,6 +349,7 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 	data := new(TaskActionDTO)
 
 	if err := c.Bind().Body(data); err != nil {
+		middleware.Log.Info("Body parsing error in update occ status handler", "err", err.Error())
 		return c.Status(400).JSON(fiber.Map{
 			"message": "Bad request",
 			"error":   err.Error(),
@@ -359,6 +372,7 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 
 	user := new(auth.User)
 	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		middleware.Log.Error("error on fetch user with userId", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -399,6 +413,7 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 				"error":   tx.Error.Error(),
 			})
 		}
+		middleware.Log.Error("error on fetch occ by occId", "err", tx.Error.Error(), "occurrenceId", occId64)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -472,6 +487,7 @@ func UpdateOccStatusHandler(c fiber.Ctx) error {
 				"error":   "occurrence could not be updated",
 			})
 		}
+		middleware.Log.Error("error on update occ status in update occ status handler", "err", tx.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -502,6 +518,7 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 	}
 
 	if err := c.Bind().Body(data); err != nil {
+		middleware.Log.Info("Body parsing error in register handler", "err", err.Error())
 		return c.Status(400).JSON(fiber.Map{
 			"message": "Bad request",
 			"error":   err.Error(),
@@ -537,6 +554,7 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 				"error":   tx.Error.Error(),
 			})
 		}
+		middleware.Log.Error("error on fetch task with taskId", "err", tx.Error.Error(), "taskId", taskId, "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -560,6 +578,7 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 	user := new(auth.User)
 
 	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		middleware.Log.Error("error on fetch user with userId", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -576,8 +595,10 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 		data.StartDate != nil
 
 	atomicDB := database.DB.Begin()
+	middleware.Log.Error("error on starting atomic transaction in update task template handler", "err", atomicDB.Error)
 	if tx := database.UpdateTaskTemplate(atomicDB, &TaskTemplate{}, taskId, uid, updates); tx.Error != nil {
 		atomicDB.Rollback()
+		middleware.Log.Error("error on update task template in update tesk template handler", "err", tx.Error.Error(), "taskId", taskId, "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -586,6 +607,7 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 	if shouldDeleteFutureOccs {
 		if tx := database.DeleteChangedOccs(atomicDB, &TaskOccurrence{}, taskId, *now, uid); tx.Error != nil {
 			atomicDB.Rollback()
+			middleware.Log.Error("error on delete changed occs in update task template handler", "err", tx.Error.Error(), "taskId", taskId, "userId", uid)
 			return c.Status(500).JSON(fiber.Map{
 				"message": "Server error",
 				"error":   tx.Error.Error(),
@@ -596,6 +618,7 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 
 			if tx := database.FetchTaskTemplateById(&TaskTemplate{}, taskId, uid, template); tx.Error != nil {
 				atomicDB.Rollback()
+				middleware.Log.Error("error on fetch task templates with taskId in update task template handler", "err", tx.Error.Error(), "taskId", taskId, "userId", uid)
 				return c.Status(500).JSON(fiber.Map{
 					"message": "Server error",
 					"error":   tx.Error.Error(),
@@ -616,6 +639,7 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 
 			if tx := database.Create(atomicDB, &occ, &TaskOccurrence{}); tx.Error != nil {
 				atomicDB.Rollback()
+				middleware.Log.Error("error on create occ in update task template handler", "err", tx.Error.Error())
 				return c.Status(500).JSON(fiber.Map{
 					"message": "Server error",
 					"error":   tx.Error.Error(),
@@ -627,6 +651,7 @@ func UpdateTaskTemplateHandler(c fiber.Ctx) error {
 
 	if res := atomicDB.Commit(); res.Error != nil {
 		atomicDB.Rollback()
+		middleware.Log.Error("error on commiting atomic transaction in update task template handler", "err", res.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   res.Error.Error(),
@@ -685,6 +710,7 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 	uid := c.Locals("userId").(uint)
 
 	if err := c.Bind().Body(data); err != nil {
+		middleware.Log.Info("Body parsing error in set task template handler", "err", err.Error())
 		return c.Status(400).JSON(fiber.Map{
 			"message": "Bad request",
 			"error":   err.Error(),
@@ -713,13 +739,12 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 				"error":   tx.Error.Error(),
 			})
 		}
+		middleware.Log.Error("error on fetch task template with taskId in set task template handler", "err", tx.Error.Error(), "taskId", taskId, "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
 		})
 	}
-
-	fmt.Printf("DEBUG: Incoming IsActive: %v, DB IsActive: %v\n", *data.IsActive, template.IsActive)
 
 	if template.IsActive == *data.IsActive {
 		return c.Status(200).JSON(fiber.Map{
@@ -736,6 +761,7 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 	user := new(auth.User)
 
 	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		middleware.Log.Error("error on fetch user with userId in set task template status handler", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -745,8 +771,16 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 	now := getLocalDate(*user)
 
 	atomicDb := database.DB.Begin()
+	if atomicDb.Error != nil {
+		middleware.Log.Error("error on starting atomic transaction in set task template status handler", "err", atomicDb.Error)
+		return c.Status(500).JSON(fiber.Map{
+			"message": "Server error",
+			"error":   atomicDb.Error.Error(),
+		})
+	}
 	if tx := database.UpdateTaskTemplate(atomicDb, &TaskTemplate{}, taskId, uid, update); tx.Error != nil {
 		atomicDb.Rollback()
+		middleware.Log.Error("error on update task template in set task template status handler", "err", tx.Error.Error(), "taskId", taskId, "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -756,13 +790,14 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 	if !(*data.IsActive) {
 		if tx := database.DeleteChangedOccs(atomicDb, &TaskOccurrence{}, taskId, *now, uid); tx.Error != nil {
 			atomicDb.Rollback()
+			middleware.Log.Error("error on delete changed occs in set task template status handler", "taskId", taskId, "userId", uid)
 			return c.Status(500).JSON(fiber.Map{
 				"message": "Server error",
 				"error":   tx.Error.Error(),
 			})
 		}
 	} else {
-		fmt.Printf("DEBUG: DueDate: %v, Now: %v, Before: %v\n", template.DueDate, *now, template.DueDate.Before(*now))
+
 		if template.RepeatType == "once" && !template.DueDate.Before(*now) {
 			occ := &TaskOccurrence{
 				TaskID:  template.ID,
@@ -773,6 +808,7 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 
 			if tx := database.Create(atomicDb, occ, &TaskOccurrence{}); tx.Error != nil {
 				atomicDb.Rollback()
+				middleware.Log.Error("error on create occ in set task template status handler", "err", tx.Error, "occurrenceId", occ.ID, "taskId", occ.TaskID)
 				return c.Status(500).JSON(fiber.Map{
 					"message": "Server error",
 					"error":   tx.Error.Error(),
@@ -783,6 +819,7 @@ func SetTaskTemplateStatusHandler(c fiber.Ctx) error {
 
 	if res := atomicDb.Commit(); res.Error != nil {
 		atomicDb.Rollback()
+		middleware.Log.Error("error on commiting atomic transaction in set task template status handler", "err", res.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   res.Error.Error(),
@@ -805,6 +842,7 @@ func GetTaskTemplatesHandler(c fiber.Ctx) error {
 	var inactiveTemplates []TaskTemplate
 
 	if tx := database.FetchTaskTemplates(&TaskTemplate{}, uid, &templates); tx.Error != nil {
+		middleware.Log.Error("error on fetch task templates in get task templates handler", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -850,6 +888,7 @@ func GetTemplateDetailHandler(c fiber.Ctx) error {
 				"error":   tx.Error.Error(),
 			})
 		}
+		middleware.Log.Error("error on fetch task template with taskId", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -969,7 +1008,7 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, LimitTim
 
 	var existingOccurence []OccKey
 	if tx := database.FetchOccurenceByUID(uid, &TaskOccurrence{}, &existingOccurence, now, LimitTime); tx.Error != nil {
-		fmt.Println("FetchOccurenceByUID error")
+		middleware.Log.Error("error on fetch occs with userId", "err", tx.Error.Error(), "userId", uid)
 		return nil, tx.Error
 	}
 
@@ -998,6 +1037,7 @@ func generateOcc(taskTemplates []TaskTemplate, uid uint, now time.Time, LimitTim
 	}
 	if len(missingOccurrence) > 0 {
 		if tx := database.CreateOccurrencesBatch(database.DB, missingOccurrence, &TaskOccurrence{}, 200); tx.Error != nil && !strings.Contains(tx.Error.Error(), "SQLSTATE 23505") {
+			middleware.Log.Error("error on batch create occs", "err", tx.Error.Error(), "userId", uid)
 			return nil, tx.Error
 		}
 	}
@@ -1011,6 +1051,7 @@ func GetTodayOccs(c fiber.Ctx) error {
 	user := new(auth.User)
 
 	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		middleware.Log.Error("error on fetch user with userId in get today occs handler", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -1024,6 +1065,7 @@ func GetTodayOccs(c fiber.Ctx) error {
 	var taskTemplatesMap map[uint]TaskTemplate
 
 	if tx := database.FetchTasksByUID(uid, &TaskTemplate{}, &taskTemplates); tx.Error != nil {
+		middleware.Log.Error("error on fetch task templates with userId in get today occs handler", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -1033,6 +1075,7 @@ func GetTodayOccs(c fiber.Ctx) error {
 	taskTemplatesMap, generateErr := generateOcc(taskTemplates, uid, *today, monthEnd)
 
 	if generateErr != nil {
+		middleware.Log.Error("error on generate occ in get today occs handler", "err", generateErr, "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   generateErr.Error(),
@@ -1042,6 +1085,7 @@ func GetTodayOccs(c fiber.Ctx) error {
 	var uncompletedOcc []TaskOccurrence
 
 	if tx := database.FetchUncompletedOccurrences(uid, &TaskOccurrence{}, &uncompletedOcc, *today); tx.Error != nil {
+		middleware.Log.Error("error on fetch uncompleted occs with userId", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -1075,14 +1119,7 @@ func GetTodayOccs(c fiber.Ctx) error {
 				DueDate:     occ.DueDate,
 				Status:      occ.Status,
 			})
-		} /* else {
-			fmt.Println("----------------------------DEBUG TIME-------------------------------------------")
-			fmt.Println(occ.TaskID)
-			fmt.Println(occ.DueDate)
-			fmt.Println(dueNorm)
-			fmt.Println(*today)
-			fmt.Println(" ")
-		} */
+		}
 	}
 
 	return c.Status(200).JSON(fiber.Map{
@@ -1123,6 +1160,7 @@ func WeeklyReportHandler(c fiber.Ctx) error {
 	user := new(auth.User)
 
 	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		middleware.Log.Error("error on fetch user with userId in weekly report handler", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -1140,6 +1178,7 @@ func WeeklyReportHandler(c fiber.Ctx) error {
 	var overdue []map[string]any
 
 	if tx := database.FetchWeeklyOccurrences(uid, &TaskOccurrence{}, weekStartDay, weekEndDay, &occurrences); tx.Error != nil {
+		middleware.Log.Error("error on fetch weekly occs with userId", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"Message": "Server error",
 			"error":   tx.Error,
@@ -1147,6 +1186,7 @@ func WeeklyReportHandler(c fiber.Ctx) error {
 	}
 
 	if tx := database.FetchOverdueOccurrences(uid, &TaskOccurrence{}, weekEndDay, &overdueOccurrences); tx.Error != nil {
+		middleware.Log.Error("error on fetc overdue occs with userId", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"Message": "Server error",
 			"error":   tx.Error,
@@ -1159,6 +1199,7 @@ func WeeklyReportHandler(c fiber.Ctx) error {
 		if templatesTitle[occ.TaskID] == "" {
 			template := new(TaskTemplate)
 			if tx := database.FetchTaskTemplateById(&TaskTemplate{}, occ.TaskID, uid, template); tx.Error != nil {
+				middleware.Log.Error("error on fetch taskTemplate with taskId in weekly report handler", "err", tx.Error, "userId", uid, "taskId", occ.TaskID)
 				return c.Status(500).JSON(fiber.Map{
 					"message": "Server error",
 					"error":   tx.Error.Error(),
@@ -1191,16 +1232,14 @@ func WeeklyReportHandler(c fiber.Ctx) error {
 				"title": templatesTitle[occ.TaskID],
 			})
 
-		case "pending":
-
 		}
-
 	}
 
 	for _, occ := range overdueOccurrences {
 		if templatesTitle[occ.TaskID] == "" {
 			template := new(TaskTemplate)
 			if tx := database.FetchTaskTemplateById(&TaskTemplate{}, occ.TaskID, uid, template); tx.Error != nil {
+				middleware.Log.Error("error on fetch taskTemplate with taskId in weekly report handler", "err", tx.Error, "userId", uid, "taskId", occ.TaskID)
 				return c.Status(500).JSON(fiber.Map{
 					"message": "Server error",
 					"error":   tx.Error.Error(),

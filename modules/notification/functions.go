@@ -63,7 +63,7 @@ func SendWeeklyReportNotification() (errors []error) {
 	}
 
 	for _, token := range tokens {
-		if _, err := SendPushToToken(token.Token, token.UserID, "Your Weekly Report is Ready!", "See how you performed this week"); err != nil {
+		if _, err := SendPushToToken(token.Token, token.UserID, "Your Weekly Report is Ready!", "Review your progress, completed tasks, and areas to improve this week."); err != nil {
 			errors = append(errors, err)
 			continue
 		}
@@ -86,7 +86,7 @@ func StartScheduler() {
 
 		err, errs := SendDailyTaskReminderPushes()
 		if err != nil {
-			middleware.Log.Error("CRON FATAl daily push notification can't sended", "err", err)
+			middleware.Log.Error("CRON FATAl daily push notification failed", "err", err)
 		}
 		if errs != nil {
 			middleware.Log.Error("CRON daily push notifications errors", "errs", errs)

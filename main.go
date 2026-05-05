@@ -95,8 +95,8 @@ func main() {
 	protected.Get("/test/report", task.WeeklyReportHandler)
 
 	protected.Patch("/tasks/occurrences/:id/status", task.UpdateOccStatusHandler)
-	middleware.Log.Info("Starting server on :" + port)
 
+	middleware.Log.Info("Starting server on :" + port)
 	if err := app.Listen(":" + port); err != nil {
 		middleware.Log.Error("Server failed to start", "err", err.Error())
 		os.Exit(1)

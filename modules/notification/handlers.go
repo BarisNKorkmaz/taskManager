@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/BarisNKorkmaz/taskManager/database"
+	"github.com/BarisNKorkmaz/taskManager/middleware"
 	"github.com/BarisNKorkmaz/taskManager/utils"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v3"
@@ -46,6 +47,7 @@ func RegisterPushTokenHandler(c fiber.Ctx) error {
 			isTokenExist = false
 			deviceToken.CreatedAt = now
 		} else {
+			middleware.Log.Error("error on fetch device in register push token handler", "err", tx.Error.Error())
 			return c.Status(500).JSON(fiber.Map{
 				"message": "Server error",
 				"error":   tx.Error.Error(),
@@ -76,6 +78,7 @@ func RegisterPushTokenHandler(c fiber.Ctx) error {
 		}
 	} else {
 		if tx := database.Create(database.DB, deviceToken, &DeviceToken{}); tx.Error != nil {
+			middleware.Log.Error("error on create devicetoken in register push token handler", "err", tx.Error.Error())
 			return c.Status(500).JSON(fiber.Map{
 				"message": "Server error",
 				"error":   tx.Error.Error(),
@@ -93,6 +96,7 @@ func DeletePushTokenHandler(c fiber.Ctx) error {
 	uid := c.Locals("userId").(uint)
 
 	if err := c.Bind().Body(data); err != nil {
+		middleware.Log.Info("Body parsing error in register push token handler", "err", err.Error())
 		return c.Status(400).JSON(fiber.Map{
 			"message": "Bad request",
 			"error":   err.Error(),
@@ -114,6 +118,7 @@ func DeletePushTokenHandler(c fiber.Ctx) error {
 	}
 
 	if tx := database.DeactivateDeviceToken(database.DB, data.Token, uid, &DeviceToken{}); tx.Error != nil {
+		middleware.Log.Info("error on deactivate device token in register push token", "err", tx.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),

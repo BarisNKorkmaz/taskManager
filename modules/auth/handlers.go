@@ -36,6 +36,7 @@ func RegisterHandler(c fiber.Ctx) error {
 	data := new(RegisterDTO)
 	now := time.Now()
 	if err := c.Bind().Body(data); err != nil {
+		middleware.Log.Info("Body parsing error in register handler", "err", err.Error())
 		return c.Status(400).JSON(fiber.Map{
 			"message": "Bad request",
 			"error":   err.Error(),
@@ -61,6 +62,7 @@ func RegisterHandler(c fiber.Ctx) error {
 	hashedPass, passHashErr := bcrypt.GenerateFromPassword([]byte(data.Password), bcrypt.DefaultCost)
 
 	if passHashErr != nil {
+		middleware.Log.Error("error on hashing password", "err", passHashErr)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   passHashErr.Error(),
@@ -91,6 +93,7 @@ func RegisterHandler(c fiber.Ctx) error {
 				"message": "Email already used",
 			})
 		}
+		middleware.Log.Error("error on creating user", "err", tx.Error)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -120,6 +123,7 @@ func LoginHandler(c fiber.Ctx) error {
 	data := new(LoginDTO)
 
 	if err := c.Bind().Body(data); err != nil {
+		middleware.Log.Info("Body parsing error", "err", err.Error())
 		return c.Status(400).JSON(fiber.Map{
 			"message": "Bad request",
 			"error":   err.Error(),
@@ -172,6 +176,7 @@ func LoginHandler(c fiber.Ctx) error {
 	tokens := GenerateRefreshToken(user.UserID, user.Email, c.IP())
 
 	if tokens.err != nil {
+		middleware.Log.Error("error on generate refresh token", "err", tokens.err.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tokens.err.Error(),
@@ -183,7 +188,7 @@ func LoginHandler(c fiber.Ctx) error {
 
 	dbErr := database.UpdateLastLogin(&User{}, "user_id = ?", user.UserID)
 	if dbErr.Error != nil {
-		middleware.Log.Error("failed on update last login time operation:", "err", dbErr.Error, "userID", user.UserID)
+		middleware.Log.Warn("failed on update last login time operation:", "err", dbErr.Error, "userID", user.UserID)
 	}
 
 	return c.Status(200).JSON(fiber.Map{
@@ -197,6 +202,7 @@ func MeHandler(c fiber.Ctx) error {
 	uid := c.Locals("userId").(uint)
 	user := new(User)
 	if tx := database.FetchUserByUID(uid, user); tx.Error != nil {
+		middleware.Log.Error("error on fetch user wtih userId", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -263,6 +269,7 @@ func LogoutHandler(c fiber.Ctx) error {
 	}
 
 	if tx := database.DeactivateDeviceTokenBySessionId(sessionId, &deviceTokenInterface{}); tx.Error != nil {
+		middleware.Log.Error("error on deactivate device token with session ID", "err", tx.Error.Error(), "sessionId", sessionId, "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -270,6 +277,7 @@ func LogoutHandler(c fiber.Ctx) error {
 	}
 
 	if tx := database.DeleteSessionByUserId(database.DB, uid, &Session{}); tx.Error != nil {
+		middleware.Log.Error("error on delete session with userId", "err", tx.Error.Error(), "userId", uid)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error,
@@ -328,6 +336,7 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 				"message": "If the email exists, a password reset link has been sent.",
 			})
 		}
+		middleware.Log.Error("error on fetch user with email", "err", tx.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -337,6 +346,7 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 	token, hashedToken, generateErr := utils.GeneratePassResetToken()
 
 	if generateErr != nil {
+		middleware.Log.Error("error on generate pass reset token", "err", generateErr)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   generateErr.Error(),
@@ -352,6 +362,7 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 
 	atomicDb := database.DB.Begin()
 	if atomicDb.Error != nil {
+		middleware.Log.Error("error on starting atomic transaction in forgot pass handler", "err", atomicDb.Error)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   atomicDb.Error.Error(),
@@ -360,6 +371,8 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 
 	if tx := database.DeletePassResetTokenByUserId(atomicDb, user.UserID, &PasswordResetToken{}); tx.Error != nil {
 		atomicDb.Rollback()
+		middleware.Log.Error("error on delete pass reset token with userId", "err", tx.Error.Error(), "userId", user.UserID)
+
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -368,6 +381,7 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 
 	if tx := database.Create(atomicDb, &resetToken, &PasswordResetToken{}); tx.Error != nil {
 		atomicDb.Rollback()
+		middleware.Log.Error("error on create pass reset token on db", "err", tx.Error.Error(), "token", resetToken)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -376,6 +390,7 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 
 	if tx := atomicDb.Commit(); tx.Error != nil {
 		atomicDb.Rollback()
+		middleware.Log.Error("error on commiting atomic transaction in forgot pass handler", "err", tx.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -385,6 +400,7 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 	mailService, err := utils.LoadMailConfig()
 
 	if err != nil {
+		middleware.Log.Error("error on set mail config", "err", err)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   err.Error(),
@@ -392,6 +408,7 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 	}
 	frontendDomain := os.Getenv("FRONTEND_URL")
 	if frontendDomain == "" {
+		middleware.Log.Error("error on read FRONTEND_URL from env file in forgot pass handler")
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   "FRONTEND_URL env not set",
@@ -457,6 +474,7 @@ func ResetPasswordHandler(c fiber.Ctx) error {
 				"message": "Invalid or expired token",
 			})
 		}
+		middleware.Log.Error("error on fetch pass reset token with token", "err", tx.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -470,6 +488,7 @@ func ResetPasswordHandler(c fiber.Ctx) error {
 	}
 
 	if tx := database.FetchUserByUID(resetToken.UserID, user); tx.Error != nil {
+		middleware.Log.Error("error on fetch user with userId in reset pass handler", "err", tx.Error.Error(), "userId", resetToken.UserID)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -479,6 +498,7 @@ func ResetPasswordHandler(c fiber.Ctx) error {
 	updates := make(map[string]any)
 
 	if hashedNewPass, err := bcrypt.GenerateFromPassword([]byte(data.NewPassword), bcrypt.DefaultCost); err != nil {
+		middleware.Log.Error("error on hashing pass in reset pass handler", "err", err)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   err.Error(),
@@ -490,6 +510,7 @@ func ResetPasswordHandler(c fiber.Ctx) error {
 
 	atomicDb := database.DB.Begin()
 	if atomicDb.Error != nil {
+		middleware.Log.Error("error on starting atomic transaction in reset pass handler", "err", atomicDb.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   atomicDb.Error.Error(),
@@ -498,6 +519,7 @@ func ResetPasswordHandler(c fiber.Ctx) error {
 
 	if tx := database.UpdateUserPass(atomicDb, &User{}, user.UserID, updates); tx.Error != nil {
 		atomicDb.Rollback()
+		middleware.Log.Error("error on update user pass in reset pass handler", "err", tx.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -506,6 +528,7 @@ func ResetPasswordHandler(c fiber.Ctx) error {
 
 	if tx := database.DeleteSessionByUserId(atomicDb, user.UserID, &Session{}); tx.Error != nil {
 		atomicDb.Rollback()
+		middleware.Log.Error("error on delete sessin with userId in reset pass handler", "err", tx.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -514,6 +537,7 @@ func ResetPasswordHandler(c fiber.Ctx) error {
 
 	if tx := database.DeletePassResetToken(atomicDb, resetToken.ID, &PasswordResetToken{}); tx.Error != nil {
 		atomicDb.Rollback()
+		middleware.Log.Error("error on delete pass reset token in reset pass handler", "err", tx.Error.Error(), "userId", resetToken.UserID)
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
@@ -522,6 +546,7 @@ func ResetPasswordHandler(c fiber.Ctx) error {
 
 	if tx := atomicDb.Commit(); tx.Error != nil {
 		atomicDb.Rollback()
+		middleware.Log.Error("error on commiting atomic transaction in reset pass handler", "err", tx.Error.Error())
 		return c.Status(500).JSON(fiber.Map{
 			"message": "Server error",
 			"error":   tx.Error.Error(),
