@@ -215,6 +215,7 @@ func MeHandler(c fiber.Ctx) error {
 		Surname:     user.Surname,
 		Email:       user.Email,
 		IsActive:    user.IsActive,
+		Timezone:    user.Timezone,
 		LastLoginAt: user.LastLoginAt,
 		CreatedAt:   user.CreatedAt,
 	}
@@ -414,7 +415,7 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 			"error":   "FRONTEND_URL env not set",
 		})
 	}
-	resetUrl := fmt.Sprintf("%s/reset-password?token=%s", frontendDomain, token)
+	resetUrl := fmt.Sprintf("sevenplanner://reset-password?token=%s", token)
 	uid := user.UserID
 	userMail := user.Email
 	go func() {

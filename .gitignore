@@ -1,3 +1,4 @@
 .env
 /secrets
 coverage.out
+.DS_Store

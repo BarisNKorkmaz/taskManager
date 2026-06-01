@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: planner_db
+    environment:
+      POSTGRES_USER: planner
+      POSTGRES_PASSWORD: planner123
+      POSTGRES_DB: plannerdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  app:
+    build: .
+    container_name: planner_app
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    depends_on:
+      - db
+    restart: always
+
+volumes:
+  postgres_data:

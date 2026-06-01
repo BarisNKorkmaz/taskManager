@@ -34,6 +34,7 @@ type MeDTO struct {
 	Surname     string    `json:"surname"`
 	Email       string    `json:"email"`
 	IsActive    bool      `json:"isActive"`
+	Timezone    string    `json:"timezone"`
 	LastLoginAt time.Time `json:"lastLoginAt"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
