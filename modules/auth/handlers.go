@@ -44,6 +44,7 @@ func RegisterHandler(c fiber.Ctx) error {
 	}
 
 	data.Timezone = strings.TrimSpace(data.Timezone)
+	data.Email = strings.ToLower(strings.TrimSpace(data.Email))
 
 	if err := utils.Validate.Struct(data); err != nil {
 		var messages []string
@@ -129,6 +130,8 @@ func LoginHandler(c fiber.Ctx) error {
 			"error":   err.Error(),
 		})
 	}
+
+	data.Email = strings.ToLower(strings.TrimSpace(data.Email))
 
 	if errs := utils.Validate.Struct(data); errs != nil {
 		var messages []string
@@ -316,6 +319,8 @@ func ForgotPasswordHandler(c fiber.Ctx) error { // TODO rate limit eklenecek
 			"error":   err.Error(),
 		})
 	}
+
+	data.Email = strings.ToLower(strings.TrimSpace(data.Email))
 
 	if err := utils.Validate.Struct(data); err != nil {
 		var messages []string
