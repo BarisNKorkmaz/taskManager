@@ -47,7 +47,7 @@ func main() {
 		middleware.Log.Info("Database connected.")
 	}
 
-	if err := database.DB.AutoMigrate(&auth.User{}, &task.TaskTemplate{}, &task.TaskOccurrence{}, &auth.Session{}, &notification.DeviceToken{}); err != nil {
+	if err := database.DB.AutoMigrate(&auth.User{}, &task.TaskTemplate{}, &task.TaskOccurrence{}, &auth.Session{}, &auth.PasswordResetToken{}, &notification.DeviceToken{}); err != nil {
 		middleware.Log.Error("Migration error:", "err", err.Error())
 	} else {
 		middleware.Log.Info("Database migrated")
