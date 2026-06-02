@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"os"
 	"time"
 
 	"github.com/BarisNKorkmaz/taskManager/database"
@@ -12,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-var secretKey = []byte("secretKey")
+var secretKey = []byte(os.Getenv("JWT_SECRET"))
 
 type CustomClaims struct {
 	UserID    uint   `json:"userId"`

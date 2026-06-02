@@ -1,32 +1,38 @@
-# Task Manager API – Frontend Integration Guide
+# 7Planner API – Frontend Integration Guide
 
-This document explains how the frontend should interact with the Task Manager backend API.
-
-The goal is to provide all required information for integrating authentication, tasks, and dashboard functionality.
+This document explains how the frontend should interact with the 7Planner backend API.
 
 ---
 
 # Base URL
 
+All routes are prefixed with `/v1`.
+
 Development:
 
 ```
-http://localhost:5001
+http://localhost:5000/v1
 ```
 
-All authenticated routes require a **JWT access token**.
+Production:
+
+```
+https://api.7-planner.com/v1
+```
 
 ---
 
 # Authentication
 
-Authentication uses **JWT Bearer tokens**.
+Authentication uses **JWT Bearer tokens** for protected routes and **HttpOnly cookies** for refresh tokens.
 
-After login, the frontend must store the token and include it in requests:
+After login or register, store the access token and include it in every protected request:
 
 ```
 Authorization: Bearer ACCESS_TOKEN
 ```
+
+The refresh token is automatically managed via an HttpOnly cookie (`refresh_token`).
 
 ---
 
@@ -34,10 +40,8 @@ Authorization: Bearer ACCESS_TOKEN
 
 ## Register
 
-Create a new user.
-
 ```
-POST /auth/register
+POST /v1/auth/register
 ```
 
 Request:
@@ -47,26 +51,28 @@ Request:
   "name": "John",
   "surname": "Doe",
   "email": "john@example.com",
-  "password": "123456"
+  "password": "password123",
+  "timezone": "Europe/Istanbul"
 }
 ```
 
-Response:
+Response `201`:
 
 ```json
 {
-  "message": "User successfully created"
+  "message": "User successfully created",
+  "accessToken": "JWT_TOKEN"
 }
 ```
+
+> Sets `refresh_token` HttpOnly cookie.
 
 ---
 
 ## Login
 
-Authenticate a user.
-
 ```
-POST /auth/login
+POST /v1/auth/login
 ```
 
 Request:
@@ -74,48 +80,204 @@ Request:
 ```json
 {
   "email": "john@example.com",
-  "password": "123456"
+  "password": "password123"
 }
 ```
 
-Response:
+Response `200`:
 
 ```json
 {
+  "message": "Successfully logged in",
   "accessToken": "JWT_TOKEN"
 }
 ```
 
-The frontend must store this token.
+> Sets `refresh_token` HttpOnly cookie. Rate limited per email and IP.
 
 ---
 
-## Get Current User
-
-Returns the authenticated user.
+## Refresh Token
 
 ```
-GET /auth/me
+POST /v1/auth/refresh
 ```
 
-Headers:
+No request body. Uses the `refresh_token` cookie automatically.
+
+Response `200`:
+
+```json
+{
+  "message": "Token refreshed successfully",
+  "accessToken": "NEW_JWT_TOKEN"
+}
+```
+
+> Call this endpoint when the access token expires (401 response).
+
+---
+
+## Forgot Password
+
+```
+POST /v1/auth/forgot-password
+```
+
+Request:
+
+```json
+{
+  "email": "john@example.com"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "message": "If the email exists, a password reset link has been sent."
+}
+```
+
+> Always returns 200 to prevent email enumeration. Reset link is valid for 15 minutes.
+
+---
+
+## Reset Password
+
+```
+POST /v1/auth/reset-password
+```
+
+Request:
+
+```json
+{
+  "token": "RESET_TOKEN_FROM_EMAIL",
+  "newPassword": "newpassword123",
+  "confirmPassword": "newpassword123"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "message": "Password successfully changed"
+}
+```
+
+> Invalidates all active sessions after reset.
+
+---
+
+# Protected Endpoints
+
+All routes below require:
 
 ```
 Authorization: Bearer ACCESS_TOKEN
 ```
 
-Response:
+---
+
+## Get Current User
+
+```
+GET /v1/u/me
+```
+
+Response `200`:
 
 ```json
 {
+  "message": "User successfully fetched",
   "user": {
     "userId": 1,
     "name": "John",
     "surname": "Doe",
     "email": "john@example.com",
     "isActive": true,
-    "createdAt": "2026-03-12T12:00:00Z"
+    "timezone": "Europe/Istanbul",
+    "lastLoginAt": "2026-03-12T12:00:00Z",
+    "createdAt": "2026-01-01T00:00:00Z"
   }
+}
+```
+
+---
+
+## Logout
+
+```
+POST /v1/u/auth/logout
+```
+
+No request body.
+
+Response `200`:
+
+```json
+{
+  "message": "Successfully logged out"
+}
+```
+
+> Clears the `refresh_token` cookie and deactivates the current session.
+
+---
+
+# Notifications
+
+## Register Push Token
+
+```
+POST /v1/u/notifications/tokens
+```
+
+Request:
+
+```json
+{
+  "token": "FCM_OR_APNs_TOKEN",
+  "platform": "ios",
+  "deviceId": "optional-device-id",
+  "appVersion": "1.0.0"
+}
+```
+
+Platform options: `ios`, `android`, `web`
+
+Response `201`:
+
+```json
+{
+  "message": "Device Token successfully created."
+}
+```
+
+---
+
+## Delete Push Token
+
+```
+DELETE /v1/u/notifications/tokens
+```
+
+Request:
+
+```json
+{
+  "token": "FCM_OR_APNs_TOKEN"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "message": "Device token successfully deactivated"
 }
 ```
 
@@ -123,22 +285,17 @@ Response:
 
 # Task Templates
 
-Tasks are created as **templates**.
-
-Two types exist:
-
-- One-shot tasks
-- Repeatable tasks
+Templates define tasks. A task can be one-shot (has `dueDate`) or repeatable (has `repeatUnit`).
 
 ---
 
-## Create Task Template
+## Create Template
 
 ```
-POST /api/tasks/templates
+POST /v1/u/templates
 ```
 
-### One-shot example
+One-shot example:
 
 ```json
 {
@@ -148,7 +305,7 @@ POST /api/tasks/templates
 }
 ```
 
-### Repeatable example
+Repeatable example:
 
 ```json
 {
@@ -160,30 +317,32 @@ POST /api/tasks/templates
 }
 ```
 
-Repeat unit options:
+Repeat unit options: `day`, `week`, `month`
 
-```
-day
-week
-month
+Response `201`:
+
+```json
+{
+  "message": "Task template successfully created"
+}
 ```
 
 ---
 
-## Get Task Templates
+## Get Templates
 
 ```
-GET /api/tasks/templates
+GET /v1/u/templates
 ```
 
-Returns active and inactive templates.
+Returns all active and inactive templates for the current user.
 
 ---
 
 ## Get Template Detail
 
 ```
-GET /api/tasks/templates/:id
+GET /v1/u/templates/:id
 ```
 
 ---
@@ -191,26 +350,21 @@ GET /api/tasks/templates/:id
 ## Update Template
 
 ```
-PATCH /api/tasks/templates/:id
+PATCH /v1/u/templates/:id
 ```
 
-Fields that can be updated:
+Updatable fields:
 
 ```
-title
-description
-dueDate
-repeatUnit
-repeatInterval
-startDate
+title, description, dueDate, repeatUnit, repeatInterval, startDate
 ```
 
 ---
 
-## Activate / Deactivate Template
+## Set Template Status
 
 ```
-PATCH /api/tasks/templates/:id/status
+PATCH /v1/u/templates/:id/status
 ```
 
 Request:
@@ -223,35 +377,15 @@ Request:
 
 ---
 
-# Dashboard
+# Tasks & Dashboard
 
-Returns aggregated task data.
-
-```
-GET /api/dashboard
-```
-
-Response example:
-
-```json
-{
-  "overdue": [],
-  "week": [],
-  "month": []
-}
-```
-
----
-
-# Today Tasks
-
-Main screen endpoint.
+## Today Tasks
 
 ```
-GET /api/tasks/today
+GET /v1/u/tasks/today
 ```
 
-Response:
+Response `200`:
 
 ```json
 {
@@ -266,28 +400,31 @@ Response:
 
 ---
 
-# Task Occurrences
+## Dashboard
 
-Occurrences represent actual task instances generated from templates.
+```
+GET /v1/u/dashboard
+```
+
+Response `200`:
+
+```json
+{
+  "overdue": [],
+  "week": [],
+  "month": []
+}
+```
 
 ---
 
-## Update Task Status
+## Update Task Occurrence Status
 
 ```
-PATCH /api/tasks/occurrences/:id/status
+PATCH /v1/u/tasks/occurrences/:id
 ```
 
-Supported actions:
-
-```
-complete
-undo
-skip
-reschedule
-```
-
-Example request:
+Request:
 
 ```json
 {
@@ -295,14 +432,26 @@ Example request:
 }
 ```
 
+Action options: `complete`, `undo`, `skip`, `reschedule`
+
+---
+
+# Reports
+
+## Weekly Report
+
+```
+GET /v1/u/reports/weekly
+```
+
+Returns a weekly summary of task completion for the current user.
+
 ---
 
 # Health Check
 
-Used to verify server status.
-
 ```
-GET /health
+GET /v1/health
 ```
 
 ---
@@ -315,6 +464,7 @@ Common status codes:
 400 Bad Request
 401 Unauthorized
 404 Not Found
+409 Conflict
 500 Server Error
 ```
 
@@ -330,13 +480,13 @@ Error response format:
 
 # Basic Application Flow
 
-Typical frontend flow:
-
-1. User registers or logs in
-2. Access token is stored
-3. Fetch current user (`/auth/me`)
-4. Fetch today's tasks (`/api/tasks/today`)
-5. User completes or updates tasks
-6. Dashboard can be used for overview
+1. User registers or logs in → receives `accessToken`, cookie is set
+2. Store `accessToken` in memory
+3. Attach `Authorization: Bearer <token>` to every protected request
+4. On `401` response → call `POST /v1/auth/refresh` to get a new token
+5. Fetch current user (`GET /v1/u/me`)
+6. Fetch today's tasks (`GET /v1/u/tasks/today`)
+7. Register push token on app launch (`POST /v1/u/notifications/tokens`)
+8. On logout → call `POST /v1/u/auth/logout` and clear stored token
 
 ---
